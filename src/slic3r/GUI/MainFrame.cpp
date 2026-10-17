@@ -2612,7 +2612,7 @@ bool MainFrame::get_enable_print_status()
 // Bambu Connect remains responsible for device authorization and final confirmation.
 void MainFrame::export_sliced_plate_to_bambu_connect()
 {
-    const auto* bundle = wxGetApp().preset_bundle;
+    auto* bundle = wxGetApp().preset_bundle;
     if (!bundle || !bundle->is_bbl_vendor())
         return;
 
@@ -2665,7 +2665,7 @@ void MainFrame::start_bambu_connect_slice_send()
     if (m_bambu_connect_pending || m_plater->is_background_process_slicing())
         return;
 
-    const auto* bundle = wxGetApp().preset_bundle;
+    auto* bundle = wxGetApp().preset_bundle;
     if (!bundle || !bundle->is_bbl_vendor())
         return;
 
