@@ -203,6 +203,12 @@ class MainFrame : public DPIFrame
 #if 0
     wxMenuItem* m_menu_item_repeat { nullptr }; // doesn't used now
 #endif
+    // One-shot handoff to Bambu Connect; the timer is owned by MainFrame.
+    wxTimer m_bambu_connect_timer;
+    bool m_bambu_connect_pending { false };
+    int m_bambu_connect_plate_index { -1 };
+    int m_bambu_connect_poll_count { 0 };
+
     wxMenuItem* m_menu_item_reslice_now { nullptr };
     wxSizer*    m_main_sizer{ nullptr };
 
@@ -222,6 +228,9 @@ class MainFrame : public DPIFrame
     bool can_export_supports() const;
     bool can_export_gcode() const;
     bool can_export_all_gcode() const;
+    void start_bambu_connect_slice_send();
+    void on_bambu_connect_timer(wxTimerEvent&);
+    void export_sliced_plate_to_bambu_connect();
     bool can_print_3mf() const;
     bool can_send_gcode() const;
     //bool can_export_gcode_sd() const;
@@ -352,7 +361,8 @@ public:
         eSendToPrinterAll    = 6,
         eUploadGcode         = 7,
         eExportAllSlicedFile = 8,
-        ePrintMultiMachine   = 9
+        ePrintMultiMachine   = 9,
+        eBambuConnectSliceSend = 10
     };
 
     void update_layout();
