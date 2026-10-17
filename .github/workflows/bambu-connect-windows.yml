@@ -1,0 +1,22 @@
+name: Bambu Connect — Windows x64 test build
+
+on:
+  push:
+    branches:
+      - feature/bambu-connect-slice-send
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-x64:
+    name: Build experimental OrcaSlicer (Windows x64)
+    uses: ./.github/workflows/build_check_cache.yml
+    with:
+      os: windows-latest
+      arch: x64
+      compiler: clang
+      build-deps-only: false
+      force-build: false
+    secrets: inherit
