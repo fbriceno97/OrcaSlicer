@@ -393,6 +393,9 @@ DPIFrame(NULL, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, BORDERLESS_FRAME_
     , m_idle([] { return wxGetApp().input_idle_ms(); })
     , m_diff_dialog("compare_presets", 100, [this] { return make_diff_dialog(); })
 {
+    m_bambu_connect_timer.SetOwner(this, wxWindow::NewControlId());
+    Bind(wxEVT_TIMER, &MainFrame::on_bambu_connect_timer, this, m_bambu_connect_timer.GetId());
+
 #ifdef __WXOSX__
     set_miniaturizable(GetHandle());
 #endif
@@ -1274,6 +1277,8 @@ void MainFrame::update_edge_panels()
 // Called when closing the application and when switching the application language.
 void MainFrame::shutdown()
 {
+    m_bambu_connect_pending = false;
+    m_bambu_connect_timer.Stop();
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << "MainFrame::shutdown enter";
     m_idle.stop();
     if (ProjectPanel* project = ProjectPanel::if_built())
@@ -2255,8 +2260,6 @@ wxBoxSizer* MainFrame::create_side_tools()
     m_print_btn = new SideButton(print_panel, _L("Print plate"), "");
     m_print_option_btn = new SideButton(print_panel, "", "sidebutton_dropdown", 0, 14);
 
-    m_bambu_connect_timer.SetOwner(this, wxWindow::NewControlId());
-    Bind(wxEVT_TIMER, &MainFrame::on_bambu_connect_timer, this, m_bambu_connect_timer.GetId());
 
     // Orca: restore the last used print/export action if the user opted to remember it
     PrintSelectType remembered_print_select;
