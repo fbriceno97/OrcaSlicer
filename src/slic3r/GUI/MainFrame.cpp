@@ -2718,6 +2718,7 @@ void MainFrame::on_bambu_connect_timer(wxTimerEvent&)
     if (plates.get_curr_plate_index() != m_bambu_connect_plate_index) {
         m_bambu_connect_pending = false;
         m_bambu_connect_timer.Stop();
+        m_print_btn->Enable(get_enable_print_status());
         wxMessageBox(_L("The selected plate changed during slicing. Bambu Connect handoff was cancelled."),
                      _L("Bambu Connect"), wxOK | wxICON_WARNING, this);
         return;
@@ -2728,6 +2729,7 @@ void MainFrame::on_bambu_connect_timer(wxTimerEvent&)
         && plate->is_slice_result_ready_for_export()) {
         m_bambu_connect_pending = false;
         m_bambu_connect_timer.Stop();
+        m_print_btn->Enable(get_enable_print_status());
         export_sliced_plate_to_bambu_connect();
         return;
     }
@@ -2736,6 +2738,7 @@ void MainFrame::on_bambu_connect_timer(wxTimerEvent&)
     if (++m_bambu_connect_poll_count >= 720) {
         m_bambu_connect_pending = false;
         m_bambu_connect_timer.Stop();
+        m_print_btn->Enable(get_enable_print_status());
         wxMessageBox(_L("Slicing did not produce a ready plate. No file was sent to Bambu Connect."),
                      _L("Bambu Connect"), wxOK | wxICON_WARNING, this);
     }
