@@ -11,19 +11,46 @@ jobs:
   publish-windows-x64:
     runs-on: ubuntu-latest
     steps:
-      - name: Download verified Windows x64 build artifacts
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Download tested Windows x64 installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          run-id: 39080439005
+          name: OrcaSlicer_Windows_PR1_x64
+          path: installer
+          github-token: ${{ github.token }}
+
+      - name: Download tested Windows x64 portable artifact
+        uses: actions/download-artifact@v4
+        with:
+          run-id: 39080439005
+          name: OrcaSlicer_Windows_PR1_x64_portable
+          path: portable
+          github-token: ${{ github.token }}
+
+      - name: Validate and package Windows x64 distribution
+        shell: bash
         run: |
           set -euo pipefail
-          mkdir -p installer portable dist
-          gh run download 39080439005 -R "${{ github.repository }}" -n OrcaSlicer_Windows_PR1_x64 -D installer
-          gh run download 39080439005 -R "${{ github.repository }}" -n OrcaSlicer_Windows_PR1_x64_portable -D portable
-          test "$(find installer -type f -iname '*.exe' | wc -l)" -eq 1
-          test -f portable/OrcaSlicer.exe || test "$(find portable -type f -name OrcaSlicer.exe | wc -l)" -eq 1
-          cp "$(find installer -type f -iname '*.exe' -print -quit)" dist/OrcaSlicer-BambuConnect-v0.1.0-windows-x64-setup.exe
+          mkdir -p dist
+          echo "::group::Downloaded installer contents"
+          find installer -maxdepth 5 -type f -print | head -60
+          echo "::endgroup::"
+          echo "::group::Downloaded portable contents"
+          find portable -maxdepth 5 -type f -print | head -60
+          echo "::endgroup::"
+          installer_file="$(find installer -type f -iname '*.exe' -print -quit)"
+          if [[ -z "$installer_file" ]]; then
+            echo "::error::No installer EXE found in the verified Windows x64 installer artifact"
+            exit 1
+          fi
+          if ! find portable -type f -iname '*.exe' -print -quit | grep -q .; then
+            echo "::error::No executable found in portable artifact; inspect artifact layout"
+            exit 1
+          fi
+          cp "$installer_file" dist/OrcaSlicer-BambuConnect-v0.1.0-windows-x64-setup.exe
           ( cd portable && zip -q -r ../dist/OrcaSlicer-BambuConnect-v0.1.0-windows-x64-portable.zip . )
-          sha256sum dist/* | tee dist/SHA256SUMS.txt
+          ( cd dist && sha256sum *.exe *.zip > SHA256SUMS.txt )
+          ls -lh dist
 
       - name: Publish prerelease from tested commit
         env:
