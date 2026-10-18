@@ -43,8 +43,8 @@ jobs:
             echo "::error::No installer EXE found in the verified Windows x64 installer artifact"
             exit 1
           fi
-          if ! find portable -type f -iname '*.exe' -print -quit | grep -q .; then
-            echo "::error::No executable found in portable artifact; inspect artifact layout"
+          if [[ ! -f portable/orca-slicer.exe ]]; then
+            echo "::error::Expected OrcaSlicer executable portable/orca-slicer.exe was not found"
             exit 1
           fi
           cp "$installer_file" dist/OrcaSlicer-BambuConnect-v0.1.0-windows-x64-setup.exe
