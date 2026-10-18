@@ -26,19 +26,26 @@ This fork adds **Slice & send via Bambu Connect** to the print-action dropdown f
 - This is not fully unattended one-click printing. Bambu Connect may require confirmations and mapping selections.
 - This does not spoof Bambu Studio's network identity, replace any networking plugin, change printer firmware, or require LAN Only Mode.
 - Temporary sliced files are currently retained in the OS temporary directory. Automated clean-up and full print handoff are follow-up tasks.
-- A Windows build and printer tests on A1/P2S are required; source-only commits are not proof that the application works.
+- Windows x64 portable launch, slicing, and Bambu Connect import were manually tested. Physical printing and continued Bambu Handy/cloud monitoring have not yet been confirmed.
 
 ## Origin
 
 The export URL and .gcode.3mf transfer method build upon upstream OrcaSlicer proposal [#13811](https://github.com/OrcaSlicer/OrcaSlicer/pull/13811) (unmerged as of the development work). The slice-on-demand flow and print-menu entry are implemented in this fork.
 
+## Windows x64 prerelease status
+
+The tested build comes from commit `3788f7c8c8e4af162fc7842910933195c00c3a26`, GitHub Actions run `39080439005`. The user confirmed that the Windows x64 portable app launches, slices, hands off to Bambu Connect, and reaches the final confirmation screen one click before printing. **No successful physical print is claimed.**
+
+For the initial release, package only Windows x64 binaries. The recommended install path is the portable zip, extracted alongside rather than over an existing OrcaSlicer installation. Existing stable OrcaSlicer user profiles/settings may still be shared; preserve backups where appropriate.
+
 ## Testing checklist
 
-- [ ] Windows x64 build succeeds
-- [ ] New menu item appears only for Bambu Lab printer profiles
+- [x] Windows x64 build artifacts produced (GitHub Actions run 39080439005)
+- [ ] Verify menu item is limited to Bambu Lab profiles
 - [ ] Unsliced A1 model automatically slices and opens Bambu Connect
 - [ ] Already sliced A1 model opens Bambu Connect without unnecessary re-slicing
 - [ ] Changing plates during slicing cancels handoff
 - [ ] Bambu Connect recognizes imported `.gcode.3mf` and can start a print
-- [ ] P2S import and print succeeds
+- [x] User confirmed Bambu Connect opened with a sliced file and reached the final print confirmation (printer profile not independently verified)
+- [ ] Complete actual physical print from Bambu Connect on P2S
 - [ ] Bambu Handy still monitors both devices through cloud mode
