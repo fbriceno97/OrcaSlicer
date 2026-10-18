@@ -1,0 +1,54 @@
+name: Publish Bambu Connect Windows x64 prerelease
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish-windows-x64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download verified Windows x64 build artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p installer portable dist
+          gh run download 39080439005 -R "${{ github.repository }}" -n OrcaSlicer_Windows_PR1_x64 -D installer
+          gh run download 39080439005 -R "${{ github.repository }}" -n OrcaSlicer_Windows_PR1_x64_portable -D portable
+          test "$(find installer -type f -iname '*.exe' | wc -l)" -eq 1
+          test -f portable/OrcaSlicer.exe || test "$(find portable -type f -name OrcaSlicer.exe | wc -l)" -eq 1
+          cp "$(find installer -type f -iname '*.exe' -print -quit)" dist/OrcaSlicer-BambuConnect-v0.1.0-windows-x64-setup.exe
+          ( cd portable && zip -q -r ../dist/OrcaSlicer-BambuConnect-v0.1.0-windows-x64-portable.zip . )
+          sha256sum dist/* | tee dist/SHA256SUMS.txt
+
+      - name: Publish prerelease from tested commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > notes.md <<'NOTES'
+          Windows x64 experimental OrcaSlicer → Bambu Connect integration.
+
+          Tested on the Windows x64 portable build: OrcaSlicer launches, slices a model, opens Bambu Connect, imports the sliced file, and reaches the last print confirmation. Actual physical printing, both-printer compatibility, and continued Bambu Handy remote monitoring have NOT been verified.
+
+          Assets:
+          - setup.exe: standard Windows x64 installer. This may interact with an existing OrcaSlicer installation; back up settings and keep a stable copy.
+          - portable.zip: recommended for initial testing alongside stable OrcaSlicer.
+          - SHA256SUMS.txt: integrity checksums.
+
+          Requirements: Bambu Connect installed, signed in, and registered to handle bambu-connect:// links. Keep your printer in normal cloud mode if remote Bambu Handy access is needed. Review printer/AMS/filament selections and confirm the print in Bambu Connect.
+
+          Source: fbriceno97/OrcaSlicer feature/bambu-connect-slice-send, tested commit 3788f7c8c8e4af162fc7842910933195c00c3a26.
+          GitHub Actions build: https://github.com/fbriceno97/OrcaSlicer/actions/runs/39080439005
+          NOTES
+          gh release create bambu-connect-win-x64-v0.1.0-beta1 \
+            --repo "${{ github.repository }}" \
+            --target 3788f7c8c8e4af162fc7842910933195c00c3a26 \
+            --title "Bambu Connect integration — Windows x64 beta 1" \
+            --notes-file notes.md \
+            --prerelease \
+            dist/*
