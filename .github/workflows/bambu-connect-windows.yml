@@ -7,7 +7,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
+  actions: read
 
 jobs:
   build-windows-x64:
@@ -20,3 +21,47 @@ jobs:
       build-deps-only: false
       force-build: false
     secrets: inherit
+
+  publish-installer:
+    name: Package separate Windows x64 installer
+    needs: [build-windows-x64]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Fetch installer from this Windows build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p installer dist
+          gh run download "${{ github.run_id }}" --repo "${{ github.repository }}" --pattern 'OrcaSlicer_Windows_*_x64' --dir installer
+          mapfile -d '' files < <(find installer -type f -iname '*.exe' -print0)
+          if [[ ${#files[@]} -ne 1 ]]; then
+            echo "::error::Expected one Windows x64 installer; found ${#files[@]}"
+            find installer -type f -print
+            exit 1
+          fi
+          cp "${files[0]}" dist/OrcaSlicer-BambuConnect-v0.1.0-beta2-windows-x64-setup.exe
+          (cd dist && sha256sum *.exe > SHA256SUMS.txt)
+          ls -lh dist
+
+      - name: Publish replacement beta installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cat > notes.md <<'NOTES'
+          Windows x64 installer rebuilt with a distinct NSIS package name, registry key, installation folder and shortcut name.
+
+          This is a beta candidate: side-by-side installation and uninstall behavior have NOT yet been confirmed on a Windows computer with stock OrcaSlicer installed. Back up your official OrcaSlicer settings. The existing beta1 installer is not safe for side-by-side use.
+          Data/configuration isolation is not confirmed. Do not uninstall or replace your existing official OrcaSlicer if any installer prompt asks you to.
+
+          Bambu Connect slice-to-import handoff previously passed on Windows x64. The newly rebuilt installer still requires testing.
+          Source commit: ${{ github.sha }}
+          NOTES
+          gh release create bambu-connect-win-x64-v0.1.0-beta2 \
+            --repo "${{ github.repository }}" \
+            --target "${{ github.sha }}" \
+            --title "Bambu Connect Windows x64 — separate installer beta 2" \
+            --notes-file notes.md \
+            --prerelease \
+            dist/*
