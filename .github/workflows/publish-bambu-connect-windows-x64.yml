@@ -33,10 +33,10 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           echo "::group::Downloaded installer contents"
-          find installer -maxdepth 5 -type f -print | head -60
+          find installer -maxdepth 2 -type f -name '*.exe' -print
           echo "::endgroup::"
           echo "::group::Downloaded portable contents"
-          find portable -maxdepth 5 -type f -print | head -60
+          find portable -maxdepth 1 -type f -name '*.exe' -print
           echo "::endgroup::"
           installer_file="$(find installer -type f -iname '*.exe' -print -quit)"
           if [[ -z "$installer_file" ]]; then
