@@ -74,6 +74,8 @@
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/SLAPrint.hpp"
 #include "libslic3r/PresetBundle.hpp"
+#include "slic3r/Utils/Http.hpp"
+#include <wx/msgdlg.h>
 
 #include "Tab.hpp"
 #include "ProgressStatusBar.hpp"
@@ -391,6 +393,9 @@ DPIFrame(NULL, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, BORDERLESS_FRAME_
     , m_idle([] { return wxGetApp().input_idle_ms(); })
     , m_diff_dialog("compare_presets", 100, [this] { return make_diff_dialog(); })
 {
+    m_bambu_connect_timer.SetOwner(this, wxWindow::NewControlId());
+    Bind(wxEVT_TIMER, &MainFrame::on_bambu_connect_timer, this, m_bambu_connect_timer.GetId());
+
 #ifdef __WXOSX__
     set_miniaturizable(GetHandle());
 #endif
@@ -1272,6 +1277,8 @@ void MainFrame::update_edge_panels()
 // Called when closing the application and when switching the application language.
 void MainFrame::shutdown()
 {
+    m_bambu_connect_pending = false;
+    m_bambu_connect_timer.Stop();
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << "MainFrame::shutdown enter";
     m_idle.stop();
     if (ProjectPanel* project = ProjectPanel::if_built())
@@ -2125,6 +2132,7 @@ const char* print_select_type_key(MainFrame::PrintSelectType type)
     case MainFrame::eSendToPrinter:       return "send_to_printer";
     case MainFrame::eSendToPrinterAll:    return "send_to_printer_all";
     case MainFrame::ePrintMultiMachine:   return "print_multi_machine";
+    case MainFrame::eBambuConnectSliceSend: return "bambu_connect_slice_send";
     case MainFrame::eUploadGcode:         break; // Orca: no dropdown entry, never selectable
     }
     return "";
@@ -2143,6 +2151,7 @@ wxString print_select_type_label(MainFrame::PrintSelectType type)
     case MainFrame::eSendToPrinter:       return _L("Send");
     case MainFrame::eSendToPrinterAll:    return _L("Send all");
     case MainFrame::ePrintMultiMachine:   return _L("Send to Multi-device");
+    case MainFrame::eBambuConnectSliceSend: return _L("Slice & send via Bambu Connect");
     case MainFrame::eUploadGcode:         break; // Orca: no dropdown entry, never selectable
     }
     return _L("Print plate");
@@ -2188,6 +2197,8 @@ std::vector<MainFrame::PrintSelectType> MainFrame::available_print_actions() con
     }
     if (enable_multi_machine)
         actions.push_back(ePrintMultiMachine);
+    if (preset_bundle && preset_bundle->is_bbl_vendor())
+        actions.push_back(eBambuConnectSliceSend);
     actions.push_back(eExportSlicedFile);
     actions.push_back(eExportAllSlicedFile);
     actions.push_back(eExportGcode);
@@ -2248,6 +2259,7 @@ wxBoxSizer* MainFrame::create_side_tools()
     m_slice_option_btn = new SideButton(slice_panel, "", "sidebutton_dropdown", 0, 14);
     m_print_btn = new SideButton(print_panel, _L("Print plate"), "");
     m_print_option_btn = new SideButton(print_panel, "", "sidebutton_dropdown", 0, 14);
+
 
     // Orca: restore the last used print/export action if the user opted to remember it
     PrintSelectType remembered_print_select;
@@ -2371,6 +2383,8 @@ wxBoxSizer* MainFrame::create_side_tools()
                 wxPostEvent(m_plater, SimpleEvent(EVT_GLTOOLBAR_EXPORT_SLICED_FILE));
             else if (m_print_select == eExportAllSlicedFile)
                 wxPostEvent(m_plater, SimpleEvent(EVT_GLTOOLBAR_EXPORT_ALL_SLICED_FILE));
+            else if (m_print_select == eBambuConnectSliceSend)
+                start_bambu_connect_slice_send();
             else if (m_print_select == eSendToPrinter)
                 wxPostEvent(m_plater, SimpleEvent(EVT_GLTOOLBAR_SEND_TO_PRINTER));
             else if (m_print_select == eSendToPrinterAll)
@@ -2550,6 +2564,17 @@ bool MainFrame::get_enable_print_status()
         }
         enable = enable && !is_all_plates;
 	}
+    else if (m_print_select == eBambuConnectSliceSend)
+    {
+        // Unlike ordinary export, this action is available BEFORE slicing.
+        enable = !m_bambu_connect_pending
+            && !m_plater->is_background_process_slicing()
+            && !m_plater->only_gcode_mode()
+            && !m_plater->using_exported_file()
+            && !m_plater->model().objects.empty()
+            && (current_plate->can_slice() || current_plate->is_slice_result_ready_for_export())
+            && !is_all_plates;
+    }
 	else if (m_print_select == eSendToPrinter)
 	{
 		if (!current_plate->is_slice_result_ready_for_print())
@@ -2584,6 +2609,139 @@ bool MainFrame::get_enable_print_status()
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(": m_print_select %1%, enable= %2% ")%m_print_select %enable;
 
     return enable;
+}
+
+// Export a completed slice through Bambu Connect's registered URL handler.
+// Bambu Connect remains responsible for device authorization and final confirmation.
+void MainFrame::export_sliced_plate_to_bambu_connect()
+{
+    auto* bundle = wxGetApp().preset_bundle;
+    if (!bundle || !bundle->is_bbl_vendor())
+        return;
+
+    PartPlateList& plates = m_plater->get_partplate_list();
+    PartPlate* plate = plates.get_curr_plate();
+    if (!plate || !plate->is_slice_result_ready_for_export()) {
+        wxMessageBox(_L("The plate is not ready to export. Please slice it again."),
+                     _L("Bambu Connect"), wxOK | wxICON_WARNING, this);
+        return;
+    }
+
+    // Use a unique temporary name so we never overwrite a previous print job.
+    // Bambu Connect reads this file from its URL import handler.
+    const boost::filesystem::path output_path = boost::filesystem::temp_directory_path()
+        / boost::filesystem::unique_path("orca-bambu-connect-%%%%-%%%%-%%%%-%%%%.gcode.3mf");
+
+    int result = -1;
+    try {
+        result = m_plater->export_3mf(output_path,
+            SaveStrategy::Silence | SaveStrategy::SplitModel
+            | SaveStrategy::WithGcode | SaveStrategy::SkipModel,
+            plates.get_curr_plate_index());
+    } catch (const std::exception& ex) {
+        wxMessageBox(_L("Could not export the sliced plate:") + "\n" + wxString::FromUTF8(ex.what()),
+                     _L("Bambu Connect"), wxOK | wxICON_ERROR, this);
+        return;
+    }
+
+    if (result < 0 || !boost::filesystem::is_regular_file(output_path)) {
+        wxMessageBox(_L("Could not create the sliced file for Bambu Connect."),
+                     _L("Bambu Connect"), wxOK | wxICON_ERROR, this);
+        return;
+    }
+
+    std::string display_name = into_u8(m_plater->get_export_gcode_filename(".gcode.3mf", true, false));
+    if (boost::iends_with(display_name, ".gcode.3mf"))
+        display_name.resize(display_name.size() - std::string(".gcode.3mf").size());
+
+    const std::string url = "bambu-connect://import-file?path=" + Http::url_encode(output_path.string())
+        + "&name=" + Http::url_encode(display_name)
+        + "&version=1.0.0";
+    if (!wxLaunchDefaultBrowser(wxString::FromUTF8(url.c_str()))) {
+        wxMessageBox(_L("Could not open Bambu Connect. Install Bambu Connect and make sure its URL handler is registered."),
+                     _L("Bambu Connect"), wxOK | wxICON_ERROR, this);
+    }
+}
+
+void MainFrame::start_bambu_connect_slice_send()
+{
+    if (m_bambu_connect_pending || m_plater->is_background_process_slicing())
+        return;
+
+    auto* bundle = wxGetApp().preset_bundle;
+    if (!bundle || !bundle->is_bbl_vendor())
+        return;
+
+    m_plater->exit_gizmo();
+    m_plater->update(true, true);
+
+    PartPlateList& plates = m_plater->get_partplate_list();
+    PartPlate* plate = plates.get_curr_plate();
+    if (!plate || m_plater->get_preview_canvas3D()->is_all_plates_selected())
+        return;
+
+    // Reuse a current slice; otherwise perform the same preflight as "Slice plate".
+    if (plate->is_slice_result_ready_for_export()) {
+        export_sliced_plate_to_bambu_connect();
+        return;
+    }
+    if (!plate->can_slice()) {
+        wxMessageBox(_L("This plate cannot be sliced with the current settings."),
+                     _L("Bambu Connect"), wxOK | wxICON_WARNING, this);
+        return;
+    }
+
+    bool force_filament_dialog = false;
+#ifdef __linux__
+    force_filament_dialog = bundle->get_printer_extruder_count() == 2;
+#endif
+    if (!try_pop_up_before_slice(false, m_plater, plate, force_filament_dialog))
+        return;
+
+    m_bambu_connect_pending = true;
+    m_bambu_connect_plate_index = plates.get_curr_plate_index();
+    m_bambu_connect_poll_count = 0;
+    m_bambu_connect_timer.Start(250);
+    m_print_btn->Enable(false);
+    wxPostEvent(m_plater, SimpleEvent(EVT_GLTOOLBAR_SLICE_PLATE));
+    m_tabpanel->SelectPageByName(TAB_ID_PREVIEW);
+}
+
+void MainFrame::on_bambu_connect_timer(wxTimerEvent&)
+{
+    if (!m_bambu_connect_pending) {
+        m_bambu_connect_timer.Stop();
+        return;
+    }
+
+    PartPlateList& plates = m_plater->get_partplate_list();
+    if (plates.get_curr_plate_index() != m_bambu_connect_plate_index) {
+        m_bambu_connect_pending = false;
+        m_bambu_connect_timer.Stop();
+        m_print_btn->Enable(get_enable_print_status());
+        wxMessageBox(_L("The selected plate changed during slicing. Bambu Connect handoff was cancelled."),
+                     _L("Bambu Connect"), wxOK | wxICON_WARNING, this);
+        return;
+    }
+
+    PartPlate* plate = plates.get_curr_plate();
+    if (plate && !m_plater->is_background_process_slicing()
+        && plate->is_slice_result_ready_for_export()) {
+        m_bambu_connect_pending = false;
+        m_bambu_connect_timer.Stop();
+        m_print_btn->Enable(get_enable_print_status());
+        export_sliced_plate_to_bambu_connect();
+        return;
+    }
+
+    // Fail closed if slicing errors or is cancelled: never submit a stale file.
+    if (++m_bambu_connect_poll_count >= 720) {
+        m_bambu_connect_pending = false;
+        m_bambu_connect_timer.Stop();
+        m_print_btn->Enable(get_enable_print_status());
+        wxMessageBox(_L("Slicing did not produce a ready plate. No file was sent to Bambu Connect."),
+                     _L("Bambu Connect"), wxOK | wxICON_WARNING, this);
+    }
 }
 
 void MainFrame::update_side_button_style()
@@ -2647,7 +2805,8 @@ void MainFrame::update_slice_print_status(SlicePrintEventType event, bool can_sl
         if (m_slice_select == eSlicePlate)
             enable_slice = false;
     }
-    if (!can_print)
+    // This action slices on demand, so don't require an existing sliced plate.
+    if (!can_print && m_print_select != eBambuConnectSliceSend)
         enable_print = false;
 
 
