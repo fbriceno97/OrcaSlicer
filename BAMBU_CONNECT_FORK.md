@@ -21,7 +21,7 @@ This fork adds **Slice & send via Bambu Connect** to the print-action dropdown f
 
 ## Safety and limitations
 
-- **Do not install this development build over your existing stable installation until tested.**
+- **Do not use the old v0.1.0-beta1 NSIS installer alongside official OrcaSlicer.** It uses the upstream identity and prompts to uninstall the existing application. Cancel that prompt. A separately identified replacement installer is being developed and is not yet verified.
 - The action waits for the current plate's slice to be ready; if the plate changes or 180 seconds pass without a ready slice, it cancels rather than uploading a stale file.
 - This is not fully unattended one-click printing. Bambu Connect may require confirmations and mapping selections.
 - This does not spoof Bambu Studio's network identity, replace any networking plugin, change printer firmware, or require LAN Only Mode.
@@ -36,7 +36,7 @@ The export URL and .gcode.3mf transfer method build upon upstream OrcaSlicer pro
 
 The tested build comes from commit `3788f7c8c8e4af162fc7842910933195c00c3a26`, GitHub Actions run `39080439005`. The user confirmed that the Windows x64 portable app launches, slices, hands off to Bambu Connect, and reaches the final confirmation screen one click before printing. **No successful physical print is claimed.**
 
-For the initial release, package only Windows x64 binaries. The recommended install path is the portable zip, extracted alongside rather than over an existing OrcaSlicer installation. Existing stable OrcaSlicer user profiles/settings may still be shared; preserve backups where appropriate.
+For the next release, package only Windows x64 binaries. The previous beta 1 installer is unsuitable for side-by-side installation. Verify the new NSIS install/uninstall behavior before releasing. The recommended install path is the portable zip, extracted alongside rather than over an existing OrcaSlicer installation. Existing stable OrcaSlicer user profiles/settings may still be shared; preserve backups where appropriate.
 
 ## Testing checklist
 
@@ -49,3 +49,13 @@ For the initial release, package only Windows x64 binaries. The recommended inst
 - [x] User confirmed Bambu Connect opened with a sliced file and reached the final print confirmation (printer profile not independently verified)
 - [ ] Complete actual physical print from Bambu Connect on P2S
 - [ ] Bambu Handy still monitors both devices through cloud mode
+
+## Side-by-side installer acceptance tests (not yet complete)
+
+- [ ] Existing official OrcaSlicer remains installed and usable
+- [ ] Fork NSIS installer does NOT request uninstall of stable OrcaSlicer
+- [ ] Fork installs into its own Program Files directory and has a separate Apps & Features entry
+- [ ] Fork Start Menu shortcuts do not replace official OrcaSlicer shortcuts
+- [ ] Fork and official OrcaSlicer settings/data directories do not conflict, or shared configuration is explicitly documented and tested
+- [ ] Uninstalling the fork leaves official OrcaSlicer untouched
+- [ ] Bambu Connect handoff still works with a build from the new installer
