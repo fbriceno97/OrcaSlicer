@@ -142,7 +142,7 @@ bool GLGizmoMmuSegmentation::on_init()
     m_desc["edge_detection"]   = _L("Edge detection");
     m_desc["same_color_connection"] = _L("Connected same color");
     m_desc["clipping_of_view"] = _L("Section view");
-    m_desc["reset_direction"]  = _L("Reset direction");
+    m_desc["reset_direction"]  = _L("Reset section");
     m_desc["gap_area"]         = _L("Gap area");
     m_desc["perform"]          = _L("Apply");
     m_desc["remove_all"]       = _L("Erase all");
@@ -704,11 +704,11 @@ void GLGizmoMmuSegmentation::on_render_input_window(float x, float y, float bott
     section_changed |= ImGui::BBLDragFloat("##paint_section_depth_input", &section_depth,
         0.05f, 0.f, 1.f, "%.2f");
     if (section_changed)
-        m_c->object_clipper()->set_position(std::clamp(section_depth, 0.f, 1.f), true);
+        m_c->object_clipper()->set_position_by_ratio(std::clamp(section_depth, 0.f, 1.f), Vec3d(0., 0., 1.));
     if (section_depth > 0.f) {
         if (m_imgui->button(m_desc.at("reset_direction"))) {
             wxGetApp().CallAfter([this]() {
-                m_c->object_clipper()->set_position(-1., false);
+                m_c->object_clipper()->set_position_by_ratio(0., Vec3d(0., 0., 1.));
             });
         }
     }
