@@ -1,0 +1,23 @@
+name: Bambu Studio painting port — Windows x64 candidate
+
+on:
+  push:
+    branches:
+      - feature/bambu-paint-2.8.4.57
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  windows-x64:
+    name: Experimental painting build (Windows x64)
+    uses: ./.github/workflows/build_check_cache.yml
+    with:
+      os: windows-latest
+      arch: x64
+      compiler: clang
+      build-deps-only: false
+      force-build: false
+    secrets: inherit
