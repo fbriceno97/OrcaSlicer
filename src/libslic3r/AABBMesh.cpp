@@ -187,7 +187,7 @@ AABBMesh::query_ray_hit(const Vec3d &s, const Vec3d &dir) const
 }
 
 std::vector<AABBMesh::hit_result>
-AABBMesh::query_ray_hits(const Vec3d &s, const Vec3d &dir) const
+AABBMesh::query_ray_hits(const Vec3d &s, const Vec3d &dir, bool preserve_coincident_hits) const
 {
     std::vector<AABBMesh::hit_result> outs;
     std::vector<igl::Hit<float>> hits;
@@ -199,10 +199,14 @@ AABBMesh::query_ray_hits(const Vec3d &s, const Vec3d &dir) const
 
     // Remove duplicates. They sometimes appear, for example when the ray is cast
     // along an axis of a cube due to floating-point approximations in igl (?)
-    hits.erase(std::unique(hits.begin(), hits.end(),
-                           [](const igl::Hit<float>& a, const igl::Hit<float>& b)
-                           { return a.t == b.t; }),
-               hits.end());
+    // Bambu Studio v02.08.04.57 (STUDIO-2591) retains coincident hits for
+    // painting overlapping shells. Deduplication can turn four crossings into
+    // three, causing MeshRaycaster to reject an otherwise valid surface hit.
+    if (!preserve_coincident_hits)
+        hits.erase(std::unique(hits.begin(), hits.end(),
+                               [](const igl::Hit<float>& a, const igl::Hit<float>& b)
+                               { return a.t == b.t; }),
+                   hits.end());
 
     //  Convert the igl::Hit<float> into hit_result
     outs.reserve(hits.size());

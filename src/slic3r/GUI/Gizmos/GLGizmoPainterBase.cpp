@@ -1150,7 +1150,8 @@ void GLGizmoPainterBase::update_raycast_cache(const Vec2d& mouse_position,
                    normal,
                    m_c->object_clipper()->get_clipping_plane(),
                    &facet,
-                   m_parent.get_canvas_type() != GLCanvas3D::CanvasAssembleView))
+                   m_parent.get_canvas_type() != GLCanvas3D::CanvasAssembleView,
+                   get_painter_type() == PainterGizmoType::MM_SEGMENTATION))
         {
             // In case this hit is clipped, skip it.
             if (is_mesh_point_clipped(hit.cast<double>(), trafo_matrices[mesh_id]))

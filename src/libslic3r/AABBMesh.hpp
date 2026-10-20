@@ -122,7 +122,8 @@ public:
     hit_result query_ray_hit(const Vec3d &s, const Vec3d &dir) const;
     
     // Casts a ray on the mesh and returns all hits
-    std::vector<hit_result> query_ray_hits(const Vec3d &s, const Vec3d &dir) const;
+    // Color painting preserves coincident shell intersections for inside/outside parity.
+    std::vector<hit_result> query_ray_hits(const Vec3d &s, const Vec3d &dir, bool preserve_coincident_hits = false) const;
 
     double squared_distance(const Vec3d& p, int& i, Vec3d& c) const;
     inline double squared_distance(const Vec3d &p) const

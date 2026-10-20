@@ -194,7 +194,8 @@ public:
         Vec3f& normal, // normal of the triangle that was hit
         const ClippingPlane* clipping_plane = nullptr, // clipping plane (if active)
         size_t* facet_idx = nullptr, // index of the facet hit
-        bool sinking_limit = true
+        bool sinking_limit = true,
+        bool preserve_coincident_hits = false
     ) const;
     
     const AABBMesh &get_aabb_mesh() const { return m_emesh; }
