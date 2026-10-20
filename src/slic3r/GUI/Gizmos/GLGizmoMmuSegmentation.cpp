@@ -125,10 +125,10 @@ bool GLGizmoMmuSegmentation::on_init()
 {
     // BBS
     m_shortcut = Shortcut::GizmoMmuSegmentation;
-    // Bambu Studio 2.8.4.57 uses a 0-degree starting angle for geometry edge detection.
+    // Bambu Studio 2.8.4.57 remembers a 30-degree geometry edge threshold.
     // Only this color painting gizmo is affected; other painter gizmos retain their defaults.
-    m_smart_fill_angle = 0.f;
-    m_last_edge_detection_smart_fill_angle = 0.f;
+    m_smart_fill_angle = 30.f;
+    m_last_edge_detection_smart_fill_angle = 30.f;
 
     const wxString ctrl  = GUI::shortkey_ctrl_prefix();
     const wxString alt   = GUI::shortkey_alt_prefix();
@@ -247,6 +247,7 @@ bool GLGizmoMmuSegmentation::on_number_key_down(int number)
 
 bool GLGizmoMmuSegmentation::on_tool_shortcut(Shortcut shortcut)
 {
+    const wchar_t old_tool = m_current_tool;
     switch (shortcut) {
     case Shortcut::PaintToolFill:        m_current_tool = ImGui::FillButtonIcon; break;
     case Shortcut::PaintToolTriangle:    m_current_tool = ImGui::TriangleButtonIcon; break;
@@ -255,6 +256,14 @@ bool GLGizmoMmuSegmentation::on_tool_shortcut(Shortcut shortcut)
     case Shortcut::PaintToolHeightRange: m_current_tool = ImGui::HeightRangeIcon; break;
     case Shortcut::PaintToolGapFill:     m_current_tool = ImGui::GapFillIcon; break;
     default: return false;
+    }
+    if (old_tool != m_current_tool) {
+        tool_changed(old_tool, m_current_tool);
+        for (auto &selector : m_triangle_selectors) {
+            selector->seed_fill_unselect_all_triangles();
+            selector->request_update_render_data();
+        }
+        m_parent.set_as_dirty();
     }
     return true;
 }

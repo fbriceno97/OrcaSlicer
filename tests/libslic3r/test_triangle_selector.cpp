@@ -273,3 +273,56 @@ TEST_CASE("Section clipping blocks bucket propagation into clipped faces", "[Tri
     selector.seed_fill_apply_on_triangles(EnforcerBlockerType::ENFORCER);
     REQUIRE(selector.num_facets(EnforcerBlockerType::ENFORCER) == 2);
 }
+
+TEST_CASE("A dense curved surface fills through local smooth connections at thirty degrees", "[TriangleSelector][Painting]")
+{
+    const TriangleMesh mesh = make_sphere(5., 2 * PI / 64);
+    TriangleSelector selector(mesh);
+    const auto face = mesh.its.indices.front();
+    const Vec3f hit = (mesh.its.vertices[face[0]] + mesh.its.vertices[face[1]] + mesh.its.vertices[face[2]]) / 3.f;
+    selector.bucket_fill_select_triangles(hit, 0, {}, 30.f, true, true);
+    selector.seed_fill_apply_on_triangles(EnforcerBlockerType::ENFORCER);
+    REQUIRE(selector.num_facets(EnforcerBlockerType::ENFORCER) == int(mesh.its.indices.size()));
+}
+
+TEST_CASE("Connected color fill respects boundaries created by subdividing brush strokes", "[TriangleSelector][Painting]")
+{
+    const auto shape = GENERATE(TriangleSelector::CursorType::CIRCLE, TriangleSelector::CursorType::SPHERE);
+    const TriangleMesh mesh = painting_fold(0.f);
+    TriangleSelector selector(mesh, 0.2f, 0.2f);
+    const Vec3f center(0.2f, 0.2f, 0.f);
+    auto cursor = TriangleSelector::SinglePointCursor::cursor_factory(
+        center, Vec3f(0.2f, 0.2f, 10.f), 0.12f, shape, Transform3d::Identity(), {});
+    selector.select_patch(0, std::move(cursor), EnforcerBlockerType::ENFORCER, Transform3d::Identity(), true);
+    REQUIRE(selector.has_facets(EnforcerBlockerType::ENFORCER));
+    REQUIRE(selector.has_facets(EnforcerBlockerType::NONE));
+    const auto before = selector.serialize();
+    const int painted_count = selector.num_facets(EnforcerBlockerType::ENFORCER);
+    selector.bucket_fill_select_triangles(center, 0, {}, -1.f, true, true);
+    selector.seed_fill_apply_on_triangles(EnforcerBlockerType::BLOCKER);
+    REQUIRE(selector.num_facets(EnforcerBlockerType::BLOCKER) == painted_count);
+    REQUIRE_FALSE(selector.has_facets(EnforcerBlockerType::ENFORCER));
+    REQUIRE(selector.has_facets(EnforcerBlockerType::NONE));
+    selector.deserialize(before);
+    REQUIRE(selector.num_facets(EnforcerBlockerType::ENFORCER) == painted_count);
+    REQUIRE_FALSE(selector.has_facets(EnforcerBlockerType::BLOCKER));
+}
+
+TEST_CASE("Height bands paint scaled meshes in world coordinates", "[TriangleSelector][Painting]")
+{
+    const TriangleMesh mesh = make_cube(0.1, 0.1, 0.1);
+    Transform3d transform = Transform3d::Identity();
+    transform.scale(10.);
+    TriangleSelector selector(mesh, 0.2f, 0.2f);
+    auto cursor = TriangleSelector::SinglePointCursor::cursor_factory(
+        0.4f, Vec3f(0, 0, 1), 0.2f, transform, {});
+    selector.select_patch(0, std::move(cursor), EnforcerBlockerType::ENFORCER, transform, true);
+    REQUIRE(selector.has_facets(EnforcerBlockerType::ENFORCER));
+    REQUIRE(selector.has_facets(EnforcerBlockerType::NONE));
+    const auto painted = selector.get_facets(EnforcerBlockerType::ENFORCER);
+    for (const auto &vertex : painted.vertices) {
+        // Bambu's height-band membership includes 0.02 mm tolerance.
+        CHECK(vertex.z() * 10.f > 0.38f);
+        CHECK(vertex.z() * 10.f < 0.62f);
+    }
+}

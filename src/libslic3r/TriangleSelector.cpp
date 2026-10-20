@@ -1163,6 +1163,22 @@ bool TriangleSelector::Circle::is_edge_inside_cursor(const Triangle &tr, const s
     return false;
 }
 
+// Adapted from Bambu Studio v02.08.04.57 (AGPL-3.0): height bands and
+// subdivision tolerances are measured in world coordinates, even for uniform
+// scaling. Treating them as a mesh-space spherical cursor loses narrow bands.
+TriangleSelector::HeightRange::HeightRange(float z_world_, const Vec3f& source_, float height_,
+                                           const Transform3d& trafo_, const ClippingPlane& clipping_plane_)
+    : SinglePointCursor(Vec3f::Zero(), source_, 1.f, trafo_, clipping_plane_), m_z_world(z_world_), m_height(height_)
+{
+    uniform_scaling = false;
+    // Cursor already transforms source for non-uniform scaling; assign from
+    // source_ to avoid applying the transformation twice in that case.
+    source = trafo * source_;
+    radius = height_;
+    radius_sqr = Slic3r::sqr(height_);
+    trafo_normal = trafo.linear().inverse().transpose();
+}
+
 // BBS
 bool TriangleSelector::HeightRange::is_pointer_in_triangle(const Vec3f& p1_, const Vec3f& p2_, const Vec3f& p3_) const
 {

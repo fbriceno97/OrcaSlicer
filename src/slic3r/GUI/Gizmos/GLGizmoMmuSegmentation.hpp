@@ -126,7 +126,7 @@ protected:
     // Bambu Studio 2.8.4.57 painting modes: geometry-edge fill vs connected same-color fill.
     // Retain a separate angle so switching modes never loses the tuned edge threshold.
     bool                              m_detect_geometry_edge = true;
-    float                             m_last_edge_detection_smart_fill_angle = 0.f;
+    float                             m_last_edge_detection_smart_fill_angle = 30.f;
     
     // Filament remap feature
     std::vector<size_t>               m_extruder_remap;      // index → target extruder index
