@@ -7,6 +7,7 @@
 #include "libslic3r/TriangleMesh.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include "libslic3r/libslic3r.h"
 #include <vector>
 #include <cstddef>
@@ -205,4 +206,70 @@ TEST_CASE("A truncated or malformed paint stream drops only the damaged triangle
     recomputed.reset_used_states();
     REQUIRE_FALSE(recomputed.update_used_states(0));
     REQUIRE(std::none_of(recomputed.used_states.begin(), recomputed.used_states.end(), [](bool used) { return used; }));
+}
+
+// A folded strip: the first two triangles are coplanar; the third shares an
+// edge and bends by bend_degrees. This exercises adjacency, not just cos().
+static TriangleMesh painting_fold(float bend_degrees)
+{
+    const float radians = bend_degrees * float(PI) / 180.f;
+    indexed_triangle_set its;
+    its.vertices = {Vec3f(0, 0, 0), Vec3f(1, 0, 0), Vec3f(0, 1, 0), Vec3f(1, 1, 0),
+                    Vec3f(1.f + std::cos(radians), 0, std::sin(radians))};
+    its.indices = {Vec3i32(0, 1, 2), Vec3i32(1, 3, 2), Vec3i32(1, 4, 3)};
+    return TriangleMesh(its);
+}
+
+TEST_CASE("Geometry fill respects the local dihedral threshold", "[TriangleSelector][Painting]")
+{
+    const float bend = GENERATE(0.f, 20.f, 40.f, 90.f);
+    const float threshold = GENERATE(0.f, 30.f);
+    const TriangleMesh mesh = painting_fold(bend);
+    TriangleSelector selector(mesh);
+    selector.bucket_fill_select_triangles(Vec3f(0.2f, 0.2f, 0), 0, {}, threshold, true, true);
+    selector.seed_fill_apply_on_triangles(EnforcerBlockerType::ENFORCER);
+    REQUIRE(selector.num_facets(EnforcerBlockerType::ENFORCER) == (bend <= threshold ? 3 : 2));
+}
+
+TEST_CASE("Bucket fill preserves painted color boundaries even with unrestricted geometry", "[TriangleSelector][Painting]")
+{
+    const float threshold = GENERATE(-1.f, 0.f, 30.f);
+    const TriangleMesh mesh = painting_fold(0.f);
+    TriangleSelector selector(mesh);
+    selector.set_facet(1, EnforcerBlockerType::BLOCKER);
+    selector.bucket_fill_select_triangles(Vec3f(0.2f, 0.2f, 0), 0, {}, threshold, true, true);
+    selector.seed_fill_apply_on_triangles(EnforcerBlockerType::ENFORCER);
+    REQUIRE(selector.num_facets(EnforcerBlockerType::ENFORCER) == 1);
+    REQUIRE(selector.num_facets(EnforcerBlockerType::BLOCKER) == 1);
+}
+
+TEST_CASE("Connected same color crosses sharp geometry and supports erase and state restoration", "[TriangleSelector][Painting]")
+{
+    const TriangleMesh mesh = painting_fold(90.f);
+    TriangleSelector selector(mesh);
+    selector.bucket_fill_select_triangles(Vec3f(0.2f, 0.2f, 0), 0, {}, -1.f, true, true);
+    selector.seed_fill_apply_on_triangles(EnforcerBlockerType::ENFORCER);
+    REQUIRE(selector.num_facets(EnforcerBlockerType::ENFORCER) == 3);
+    const auto painted = selector.serialize();
+    selector.bucket_fill_select_triangles(Vec3f(0.2f, 0.2f, 0), 0, {}, -1.f, true, true);
+    selector.seed_fill_apply_on_triangles(EnforcerBlockerType::NONE);
+    REQUIRE(selector.num_facets(EnforcerBlockerType::ENFORCER) == 0);
+    const auto erased = selector.serialize();
+    selector.deserialize(painted);
+    REQUIRE(selector.num_facets(EnforcerBlockerType::ENFORCER) == 3);
+    selector.deserialize(erased);
+    REQUIRE(selector.num_facets(EnforcerBlockerType::ENFORCER) == 0);
+    TriangleSelector reopened(mesh);
+    reopened.deserialize(painted);
+    REQUIRE(reopened.num_facets(EnforcerBlockerType::ENFORCER) == 3);
+}
+
+TEST_CASE("Section clipping blocks bucket propagation into clipped faces", "[TriangleSelector][Painting]")
+{
+    const TriangleMesh mesh = painting_fold(0.f);
+    TriangleSelector selector(mesh);
+    const TriangleSelector::ClippingPlane clip({1.f, 0.f, 0.f, 1.5f});
+    selector.bucket_fill_select_triangles(Vec3f(0.2f, 0.2f, 0), 0, clip, -1.f, true, true);
+    selector.seed_fill_apply_on_triangles(EnforcerBlockerType::ENFORCER);
+    REQUIRE(selector.num_facets(EnforcerBlockerType::ENFORCER) == 2);
 }

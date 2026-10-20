@@ -337,7 +337,7 @@ public:
 
     // Create new object on a TriangleMesh. The referenced mesh must
     // stay valid, a ptr to it is saved and used.
-    explicit TriangleSelector(const TriangleMesh& mesh, float edge_limit = 0.6f);
+    explicit TriangleSelector(const TriangleMesh& mesh, float edge_limit = 0.6f, float brush_edge_limit = 0.05f);
 
     // Returns the facet_idx of the unsplit triangle containing the "hit". Returns -1 if the triangle isn't found.
     [[nodiscard]] int select_unsplit_triangle(const Vec3f &hit, int facet_idx) const;
@@ -533,6 +533,9 @@ protected:
 
     // BBS
     float m_edge_limit = 0.6f;
+    // Color painting follows Bambu Studio's 0.2 mm subdivision cap. Other
+    // painters retain Orca's finer cap through the constructor default.
+    const float m_brush_edge_limit;
 
     // Number of invalid triangles (to trigger garbage collection).
     int m_invalid_triangles;

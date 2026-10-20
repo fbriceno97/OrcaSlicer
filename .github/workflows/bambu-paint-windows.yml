@@ -21,3 +21,12 @@ jobs:
       build-deps-only: false
       force-build: false
     secrets: inherit
+
+  painting-tests:
+    name: Painting and core regression tests (Windows x64)
+    needs: windows-x64
+    uses: ./.github/workflows/unit_tests.yml
+    with:
+      os: windows-latest
+      artifact: ${{ github.sha }}-tests-windows-x64
+    secrets: inherit

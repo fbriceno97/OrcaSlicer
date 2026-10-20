@@ -43,8 +43,8 @@ enum class PainterGizmoType {
 
 class TriangleSelectorGUI : public TriangleSelector {
 public:
-    explicit TriangleSelectorGUI(const TriangleMesh& mesh, float edge_limit = 0.6f)
-        : TriangleSelector(mesh, edge_limit) {}
+    explicit TriangleSelectorGUI(const TriangleMesh& mesh, float edge_limit = 0.6f, float brush_edge_limit = 0.05f)
+        : TriangleSelector(mesh, edge_limit, brush_edge_limit) {}
     virtual ~TriangleSelectorGUI() = default;
 
     virtual void render(ImGuiWrapper* imgui, const Transform3d& matrix);
@@ -113,7 +113,7 @@ struct TrianglePatch {
 class TriangleSelectorPatch : public TriangleSelectorGUI {
 public:
     explicit TriangleSelectorPatch(const TriangleMesh& mesh, const std::vector<ColorRGBA> ebt_colors, float edge_limit = 0.6f)
-        : TriangleSelectorGUI(mesh, edge_limit), m_ebt_colors(ebt_colors) {}
+        : TriangleSelectorGUI(mesh, edge_limit, 0.2f), m_ebt_colors(ebt_colors) {}
     virtual ~TriangleSelectorPatch() = default;
 
     // Render current selection. Transformation matrices are supposed
