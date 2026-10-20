@@ -1,0 +1,77 @@
+name: Publish tested Windows Beta 4
+on:
+  push:
+    branches: [release/beta4-paint]
+    paths: [.github/workflows/publish-tested-beta4.yml]
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: publish-tested-beta4
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Verify tested artifacts and publish Beta 4
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: python
+        run: |
+          import hashlib, json, pathlib, subprocess, zipfile
+          repo = "fbriceno97/OrcaSlicer"
+          sha = "11fec226a91efbb474fadda40af34b40dc14087e"
+          tag = "bambu-connect-win-x64-v0.1.0-beta4"
+          run_id = 39373787461
+          def api(path):
+              return json.loads(subprocess.check_output(["gh", "api", "repos/" + repo + "/" + path]))
+          run = api("actions/runs/" + str(run_id))
+          assert run["head_sha"] == sha and run["conclusion"] == "success", "Build must pass at tested SHA"
+          jobs = api("actions/runs/" + str(run_id) + "/jobs")["jobs"]
+          assert any("Unit Tests" in j["name"] and j["conclusion"] == "success" for j in jobs)
+          artifacts = {a["id"]: a for a in api("actions/runs/" + str(run_id) + "/artifacts")["artifacts"]}
+          out = pathlib.Path("release-assets")
+          out.mkdir()
+          assets = []
+          for aid, digest, kind in [
+              (12243681032, "1e65128802599cd0d18618e1224a925e061e02ba9c1e655630de8fa317f58d7d", "setup"),
+              (12242778215, "eb9e02d5a28d70585a337cf37ed10935bc9f955ab715687f2c3c17755d350c02", "portable")]:
+              a = artifacts[aid]
+              assert not a["expired"] and a["workflow_run"]["head_sha"] == sha
+              archive = pathlib.Path(str(aid) + ".zip")
+              with archive.open("wb") as f:
+                  subprocess.run(["gh", "api", "repos/" + repo + "/actions/artifacts/" + str(aid) + "/zip"], stdout=f, check=True)
+              assert hashlib.sha256(archive.read_bytes()).hexdigest() == digest, "Artifact checksum mismatch"
+              with zipfile.ZipFile(archive) as z:
+                  assert z.testzip() is None, "Corrupt artifact"
+                  names = z.namelist()
+                  if kind == "setup":
+                      candidates = [n for n in names if n.lower().endswith(".exe")]
+                      assert len(candidates) == 1, candidates
+                      dest = out / "OrcaSlicer-BambuConnect-v0.1.0-beta4-windows-x64-setup.exe"
+                      dest.write_bytes(z.read(candidates[0]))
+                      assert dest.read_bytes()[:2] == b"MZ"
+                  else:
+                      packed = [n for n in names if n.lower().endswith(".zip")]
+                      dest = out / "OrcaSlicer-BambuConnect-v0.1.0-beta4-windows-x64-portable.zip"
+                      if len(packed) == 1 and len([n for n in names if not n.endswith("/")]) == 1:
+                          dest.write_bytes(z.read(packed[0]))
+                      else:
+                          dest.write_bytes(archive.read_bytes())
+                      with zipfile.ZipFile(dest) as app:
+                          assert app.testzip() is None
+                          assert any(n.lower().endswith("orca-slicer.exe") for n in app.namelist()), "Missing portable executable"
+                  assets.append(dest)
+          checksums = out / "SHA256SUMS.txt"
+          checksums.write_text("".join(hashlib.sha256(p.read_bytes()).hexdigest() + "  " + p.name + "\n" for p in assets))
+          notes = pathlib.Path("release-notes.md")
+          notes.write_text("Windows x64 ONLY — experimental Beta 4.\n\n## Painting fix\nFixes color-paint surface picking on overlapping mesh shells. Orca previously removed equal-distance ray intersections, which could cause valid clicks to be rejected before edge detection ran. Adapted Bambu Studio 2.8.4.57's STUDIO-2591 behavior for color painting while preserving other callers' existing behavior.\n\nAlso includes the earlier painting updates: correct wheel-selection dispatch, Bambu brush subdivision cap, scaled height-band handling, and camera-oriented Section View.\n\n## Validation\n- Windows x64 build, installer packaging, and painting/core regression test job passed.\n- Added regression tests for overlapping shells and ordinary closed meshes.\n- The user confirmed the fix resolved the painting behavior on the supplied skull-logo lid after comparing with Bambu Studio.\n- This is not a claim of complete painting parity on every model.\n- Bambu Connect implementation remains unchanged by these painting fixes; fresh physical-printer regression testing of this build has not been independently verified.\n- Linux, macOS, Windows ARM64, and H2D dual-nozzle printing are not validated by this release.\n\n## Downloads\n- Setup EXE: Windows x64 installer.\n- Portable ZIP: extract into a separate folder and run orca-slicer.exe.\n- SHA256SUMS.txt: checksums for both downloads.\nThe application payloads are copied from the tested build, without rebuilding.\n\n## Source and build\nSource commit: 11fec226a91efbb474fadda40af34b40dc14087e\nBuild and tests: https://github.com/fbriceno97/OrcaSlicer/actions/runs/39373787461\n\nBambu Connect must be installed and signed in for print submission. Normal cloud mode can remain enabled. Review printer, nozzle, filament, and AMS selections before confirming a print.\n")
+          subprocess.run(["gh","release","create",tag,"--repo",repo,"--target",sha,"--title","OrcaSlicer Bambu Connect + Bambu Painting - Beta 4 (Windows x64 ONLY)","--notes-file",str(notes),"--draft","--prerelease"],check=True)
+          subprocess.run(["gh","release","upload",tag,"--repo",repo,*map(str,assets),str(checksums)],check=True)
+          subprocess.run(["gh","release","edit",tag,"--repo",repo,"--draft=false","--prerelease"],check=True)
+          release = api("releases/tags/" + tag)
+          assert not release["draft"] and release["prerelease"]
+          assert len(release["assets"]) == 3
+          print(release["html_url"])
+          
