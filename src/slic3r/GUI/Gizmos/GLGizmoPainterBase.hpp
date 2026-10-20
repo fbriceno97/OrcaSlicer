@@ -329,6 +329,11 @@ protected:
 
     ClippingPlaneDataWrapper get_clipping_plane_data() const;
 
+    // Bambu-style section orientation follows the camera when initialized or reset,
+    // and stays fixed while the camera rotates or the section depth changes.
+    void set_paint_section_ratio(double ratio, bool keep_normal = true);
+    Vec3d m_paint_section_normal = Vec3d::Zero();
+
     TriangleSelector::ClippingPlane get_clipping_plane_in_volume_coordinates(const Transform3d &trafo) const;
 
     // True while a paint or erase stroke is under way.

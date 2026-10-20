@@ -714,6 +714,20 @@ std::vector<GLGizmoPainterBase::ProjectedHeightRange> GLGizmoPainterBase::get_pr
     return hit_triangles_by_mesh;
 }
 
+void GLGizmoPainterBase::set_paint_section_ratio(double ratio, bool keep_normal)
+{
+    if (!keep_normal || m_paint_section_normal.squaredNorm() == 0.)
+        m_paint_section_normal = -wxGetApp().plater()->get_camera().get_dir_forward();
+    m_c->object_clipper()->set_position_by_ratio(std::clamp(ratio, 0., 1.), m_paint_section_normal);
+    // Clipping changes the hit even if the mouse has not moved.
+    m_rr.mouse_position = Vec2d(-1., -1.);
+    for (auto &selector : m_triangle_selectors) {
+        selector->seed_fill_unselect_all_triangles();
+        selector->request_update_render_data();
+    }
+    m_parent.set_as_dirty();
+}
+
 // Following function is called from GLCanvas3D to inform the gizmo about a mouse/keyboard event.
 // The gizmo has an opportunity to react - if it does, it should return true so that the Canvas3D is
 // aware that the event was reacted to and stops trying to make different sense of it. If the gizmo
@@ -771,6 +785,10 @@ bool GLGizmoPainterBase::gizmo_event(SLAGizmoEventType action, const Vec2d& mous
                 m_parent.set_as_dirty();
                 return true;
             }
+        } else if (alt_down && get_painter_type() == PainterGizmoType::MM_SEGMENTATION) {
+            const double step = action == SLAGizmoEventType::MouseWheelDown ? -0.01 : 0.01;
+            set_paint_section_ratio(m_c->object_clipper()->get_position() + step);
+            return true;
         }
     }
 

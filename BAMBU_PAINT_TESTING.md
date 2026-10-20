@@ -19,6 +19,9 @@ Reference: `bambulab/BambuStudio` tag `v02.08.04.57`, commit
   indexing modifiers as if they were paintable volumes.
 - The remembered geometry threshold starts at the reference's 30 degrees.
 - Keyboard tool changes clear stale selection previews and update gap-fill mode.
+- Section View uses the reference camera-facing orientation and preserves it while
+  changing depth. Reset captures the current camera direction; Alt+wheel changes
+  depth. Changing the section invalidates both the picked hit and fill preview.
 
 ## Selection semantics
 
@@ -86,7 +89,8 @@ rendering, GUI interactions, or file I/O.
 6. Repeat a stroke with Circle, Sphere, Triangle, and Height Range. Include a
    uniformly scaled model and a non-uniformly scaled model. Compare narrow
    details, brush strokes, and erase (Shift+left-click). Test Erase All.
-7. Move and reorient Section View, paint an exposed region, reset it, then
+7. Move Section View with the slider or Alt+wheel, paint an exposed region,
+   rotate the camera and reset the section orientation, then
    confirm the hidden side was not unintentionally selected. Test keyboard tool
    changes as well as toolbar clicks.
 8. Undo/redo each operation. Save a new 3MF, close it, reopen it, and compare

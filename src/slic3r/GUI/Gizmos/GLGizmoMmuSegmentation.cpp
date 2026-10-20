@@ -713,11 +713,11 @@ void GLGizmoMmuSegmentation::on_render_input_window(float x, float y, float bott
     section_changed |= ImGui::BBLDragFloat("##paint_section_depth_input", &section_depth,
         0.05f, 0.f, 1.f, "%.2f");
     if (section_changed)
-        m_c->object_clipper()->set_position_by_ratio(std::clamp(section_depth, 0.f, 1.f), Vec3d(0., 0., 1.));
+        set_paint_section_ratio(section_depth);
     if (section_depth > 0.f) {
         if (m_imgui->button(m_desc.at("reset_direction"))) {
             wxGetApp().CallAfter([this]() {
-                m_c->object_clipper()->set_position_by_ratio(0., Vec3d(0., 0., 1.));
+                set_paint_section_ratio(0., false);
             });
         }
     }
