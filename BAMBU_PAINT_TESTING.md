@@ -69,6 +69,16 @@ It checks identical selected triangle IDs for 216 cases, with graph sizes up to
 10,000 faces. It does not validate subdivision, adjacency construction,
 rendering, GUI interactions, or file I/O.
 
+For a broader isolated source comparison (including actual recursive brush
+subdivision and height bands), run:
+
+```sh
+python3 scripts/check_paint_selector_parity.py --reference ../bambu --eigen /path/to/eigen3
+```
+
+It requires the exact reference commit and real Eigen headers. See
+[BAMBU_PAINT_VALIDATION.md](BAMBU_PAINT_VALIDATION.md) for results and limits.
+
 ## Side-by-side user test
 
 1. Use Bambu Studio **2.8.4.57** and the candidate Windows build. Import the
