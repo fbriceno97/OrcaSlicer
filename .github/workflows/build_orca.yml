@@ -512,6 +512,44 @@ jobs:
         run: |
           cpack -G NSIS
 
+      - name: Verify custom Windows identity
+        if: runner.os == 'Windows' && !vars.SELF_HOSTED
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Get-ChildItem "$env:BUILD_DIR/OrcaSlicer*.exe" | Select-Object -First 1
+          if (!$installer) { throw 'Installer missing' }
+          $dest = Join-Path $env:RUNNER_TEMP 'OrcaCustomIdentityTest'
+          $p = Start-Process $installer.FullName -ArgumentList "/S", "/D=$dest" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Installer failed: $($p.ExitCode)" }
+          $exe = Join-Path $dest 'orca-slicer-custom-beta.exe'
+          if (!(Test-Path $exe)) { throw 'Custom launcher missing' }
+          if ((Get-Item $exe).VersionInfo.FileDescription -ne 'OrcaSlicer Custom Beta') {
+            throw 'Incorrect executable display name'
+          }
+          $found = $false
+          foreach ($view in @([Microsoft.Win32.RegistryView]::Registry64, [Microsoft.Win32.RegistryView]::Registry32)) {
+            $hive = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, $view)
+            $app = $hive.OpenSubKey('Software\Classes\Applications\orca-slicer-custom-beta.exe')
+            if ($app -and $app.GetValue('FriendlyAppName') -eq 'OrcaSlicer Custom Beta') {
+              $found = $true
+              foreach ($ext in @('3mf','stl','obj','amf','step','stp')) {
+                $key = $hive.OpenSubKey("Software\Classes\.$ext\OpenWithProgids")
+                if (!$key -or 'OrcaSlicer.CustomBeta.Model' -notin $key.GetValueNames()) {
+                  throw "Missing Open with registration: $ext"
+                }
+                $key.Dispose()
+              }
+              $command = $hive.OpenSubKey('Software\Classes\OrcaSlicer.CustomBeta.Model\shell\open\command')
+              if ($command.GetValue('') -ne ('"' + $exe + '" "%1"')) { throw 'Incorrect open command' }
+              $command.Dispose()
+            }
+            if ($app) { $app.Dispose() }
+            $hive.Dispose()
+          }
+          if (!$found) { throw 'Custom app registration missing' }
+          Write-Host 'PASS: installed launcher metadata and all six Open with associations'
+
       - name: Pack app
         if: runner.os == 'Windows'
         working-directory: ${{ github.workspace }}/${{ env.BUILD_DIR }}

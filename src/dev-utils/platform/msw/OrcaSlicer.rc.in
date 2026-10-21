@@ -7,13 +7,13 @@ PRODUCTVERSION @SLIC3R_VERSION@
   BLOCK "040904E4"
   {
    VALUE "CompanyName", "SoftFever"
-   VALUE "FileDescription", "@SLIC3R_APP_NAME@"
+   VALUE "FileDescription", "OrcaSlicer Custom Beta"
    VALUE "FileVersion", "@SLIC3R_BUILD_ID@"
-   VALUE "ProductName", "@SLIC3R_APP_NAME@"
+   VALUE "ProductName", "OrcaSlicer Custom Beta"
    VALUE "ProductVersion", "@SLIC3R_BUILD_ID@"
-   VALUE "InternalName", "@SLIC3R_APP_NAME@"
+   VALUE "InternalName", "OrcaSlicer Custom Beta"
    VALUE "LegalCopyright", ""
-   VALUE "OriginalFilename", "orca-slicer.exe"
+   VALUE "OriginalFilename", "orca-slicer-custom-beta.exe"
   }
  }
  BLOCK "VarFileInfo"

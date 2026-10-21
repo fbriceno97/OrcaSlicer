@@ -228,6 +228,13 @@ if (WIN32)
         WIN32_EXECUTABLE "$<NOT:$<CONFIG:RelWithDebInfo>>"
     )
     target_link_libraries(OrcaSlicer_app_gui PRIVATE boost_headeronly)
+    # Preserve the legacy launcher for integrations; Explorer uses the unique name.
+    add_custom_command(TARGET OrcaSlicer_app_gui POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "$<TARGET_FILE:OrcaSlicer_app_gui>"
+            "$<TARGET_FILE_DIR:OrcaSlicer_app_gui>/orca-slicer-custom-beta.exe")
+    install(FILES "$<TARGET_FILE:OrcaSlicer_app_gui>"
+        DESTINATION "." RENAME "orca-slicer-custom-beta.exe")
 endif ()
 
 # Link the resources dir to where Slic3r GUI expects it

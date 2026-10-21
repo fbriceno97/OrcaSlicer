@@ -418,7 +418,7 @@ bool is_associate_files(std::wstring extend)
     wchar_t app_path[MAX_PATH];
     ::GetModuleFileNameW(nullptr, app_path, sizeof(app_path));
 
-    std::wstring prog_id             = L" Orca.Slicer.1";
+    std::wstring prog_id             = L"OrcaSlicer.CustomBeta.Model";
     std::wstring reg_base            = L"Software\\Classes";
     std::wstring reg_extension       = reg_base + L"\\." + extend;
 
@@ -10247,8 +10247,8 @@ void GUI_App::associate_files(std::wstring extend)
     ::GetModuleFileNameW(nullptr, app_path, sizeof(app_path));
 
     std::wstring prog_path = L"\"" + std::wstring(app_path) + L"\"";
-    std::wstring prog_id = L" Orca.Slicer.1";
-    std::wstring prog_desc = L"OrcaSlicer";
+    std::wstring prog_id = L"OrcaSlicer.CustomBeta.Model";
+    std::wstring prog_desc = L"OrcaSlicer Custom Beta";
     std::wstring prog_command = prog_path + L" \"%1\"";
     std::wstring reg_base = L"Software\\Classes";
     std::wstring reg_extension = reg_base + L"\\." + extend;
@@ -10274,8 +10274,8 @@ void GUI_App::disassociate_files(std::wstring extend)
     ::GetModuleFileNameW(nullptr, app_path, sizeof(app_path));
 
     std::wstring prog_path = L"\"" + std::wstring(app_path) + L"\"";
-    std::wstring prog_id = L" Orca.Slicer.1";
-    std::wstring prog_desc = L"OrcaSlicer";
+    std::wstring prog_id = L"OrcaSlicer.CustomBeta.Model";
+    std::wstring prog_desc = L"OrcaSlicer Custom Beta";
     std::wstring prog_command = prog_path + L" \"%1\"";
     std::wstring reg_base = L"Software\\Classes";
     std::wstring reg_extension = reg_base + L"\\." + extend;

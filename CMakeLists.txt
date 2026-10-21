@@ -1359,19 +1359,54 @@ set (CPACK_PACKAGE_ICON "${CMAKE_SOURCE_DIR}/resources/images\\\\OrcaSlicer.ico"
 set (CPACK_NSIS_MUI_ICON "${CPACK_PACKAGE_ICON}")
 set (CPACK_NSIS_MUI_UNIICON "${CPACK_PACKAGE_ICON}")
 # Relative to the install dir: CPack's NSIS template prefixes $INSTDIR itself.
-set (CPACK_NSIS_INSTALLED_ICON_NAME "orca-slicer.exe")
+set (CPACK_NSIS_INSTALLED_ICON_NAME "orca-slicer-custom-beta.exe")
 set (CPACK_PACKAGE_CHECKSUM SHA256)
 set (CPACK_PACKAGE_INSTALL_REGISTRY_KEY "OrcaSlicer BambuConnect")
-set (CPACK_NSIS_DISPLAY_NAME "OrcaSlicer BambuConnect")
-set (CPACK_NSIS_PACKAGE_NAME "OrcaSlicer BambuConnect")
+set (CPACK_NSIS_DISPLAY_NAME "OrcaSlicer Custom Beta")
+set (CPACK_NSIS_PACKAGE_NAME "OrcaSlicer Custom Beta")
 set (CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
 set (CPACK_NSIS_EXECUTABLES_DIRECTORY ".")
 # set (CPACK_NSIS_MODIFY_PATH "ON")
-set(CPACK_PACKAGE_EXECUTABLES "orca-slicer;OrcaSlicer BambuConnect")
+set(CPACK_PACKAGE_EXECUTABLES "orca-slicer-custom-beta;OrcaSlicer Custom Beta")
 # Avoid creating a desktop shortcut with the same identity as stable OrcaSlicer.
 # The uniquely named Start Menu shortcut is created from CPACK_PACKAGE_EXECUTABLES.
 set (CPACK_RESOURCE_FILE_LICENSE ${CMAKE_SOURCE_DIR}/LICENSE.txt) # must also include in install command
 
 set(CPACK_WIX_UPGRADE_GUID "058245e8-20e0-4a95-9ab7-1acfe17ad511")
 set(CPACK_GENERATOR NSIS)
+# Register the fork as an Open with candidate without changing the default app.
+if (WIN32)
+set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS [=[
+WriteRegStr HKLM "Software\Classes\Applications\orca-slicer-custom-beta.exe" "FriendlyAppName" "OrcaSlicer Custom Beta"
+WriteRegStr HKLM "Software\Classes\Applications\orca-slicer-custom-beta.exe\shell\open\command" "" '"$INSTDIR\orca-slicer-custom-beta.exe" "%1"'
+WriteRegStr HKLM "Software\Classes\OrcaSlicer.CustomBeta.Model" "" "OrcaSlicer Custom Beta"
+WriteRegStr HKLM "Software\Classes\OrcaSlicer.CustomBeta.Model\Application" "ApplicationName" "OrcaSlicer Custom Beta"
+WriteRegStr HKLM "Software\Classes\OrcaSlicer.CustomBeta.Model\DefaultIcon" "" '"$INSTDIR\orca-slicer-custom-beta.exe",0'
+WriteRegStr HKLM "Software\Classes\OrcaSlicer.CustomBeta.Model\shell\open\command" "" '"$INSTDIR\orca-slicer-custom-beta.exe" "%1"'
+WriteRegStr HKLM "Software\Classes\Applications\orca-slicer-custom-beta.exe\SupportedTypes" ".3mf" ""
+WriteRegStr HKLM "Software\Classes\.3mf\OpenWithProgids" "OrcaSlicer.CustomBeta.Model" ""
+WriteRegStr HKLM "Software\Classes\Applications\orca-slicer-custom-beta.exe\SupportedTypes" ".stl" ""
+WriteRegStr HKLM "Software\Classes\.stl\OpenWithProgids" "OrcaSlicer.CustomBeta.Model" ""
+WriteRegStr HKLM "Software\Classes\Applications\orca-slicer-custom-beta.exe\SupportedTypes" ".obj" ""
+WriteRegStr HKLM "Software\Classes\.obj\OpenWithProgids" "OrcaSlicer.CustomBeta.Model" ""
+WriteRegStr HKLM "Software\Classes\Applications\orca-slicer-custom-beta.exe\SupportedTypes" ".amf" ""
+WriteRegStr HKLM "Software\Classes\.amf\OpenWithProgids" "OrcaSlicer.CustomBeta.Model" ""
+WriteRegStr HKLM "Software\Classes\Applications\orca-slicer-custom-beta.exe\SupportedTypes" ".step" ""
+WriteRegStr HKLM "Software\Classes\.step\OpenWithProgids" "OrcaSlicer.CustomBeta.Model" ""
+WriteRegStr HKLM "Software\Classes\Applications\orca-slicer-custom-beta.exe\SupportedTypes" ".stp" ""
+WriteRegStr HKLM "Software\Classes\.stp\OpenWithProgids" "OrcaSlicer.CustomBeta.Model" ""
+System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+]=])
+set(CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS [=[
+DeleteRegKey HKLM "Software\Classes\Applications\orca-slicer-custom-beta.exe"
+DeleteRegKey HKLM "Software\Classes\OrcaSlicer.CustomBeta.Model"
+DeleteRegValue HKLM "Software\Classes\.3mf\OpenWithProgids" "OrcaSlicer.CustomBeta.Model"
+DeleteRegValue HKLM "Software\Classes\.stl\OpenWithProgids" "OrcaSlicer.CustomBeta.Model"
+DeleteRegValue HKLM "Software\Classes\.obj\OpenWithProgids" "OrcaSlicer.CustomBeta.Model"
+DeleteRegValue HKLM "Software\Classes\.amf\OpenWithProgids" "OrcaSlicer.CustomBeta.Model"
+DeleteRegValue HKLM "Software\Classes\.step\OpenWithProgids" "OrcaSlicer.CustomBeta.Model"
+DeleteRegValue HKLM "Software\Classes\.stp\OpenWithProgids" "OrcaSlicer.CustomBeta.Model"
+System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+]=])
+endif()
 include(CPack)
