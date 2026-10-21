@@ -1355,7 +1355,7 @@ endif ()
 set (CPACK_PACKAGE_DESCRIPTION_SUMMARY "Orca Slicer is an open source slicer for FDM printers")
 set (CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/fbriceno97/OrcaSlicer")
 set (CPACK_PACKAGE_INSTALL_DIRECTORY ${CPACK_PACKAGE_NAME})
-set (CPACK_PACKAGE_ICON "${CMAKE_SOURCE_DIR}/resources/images\\\\OrcaSlicer.ico")
+set (CPACK_PACKAGE_ICON "${CMAKE_SOURCE_DIR}/resources/images\\OrcaSlicer.ico")
 set (CPACK_NSIS_MUI_ICON "${CPACK_PACKAGE_ICON}")
 set (CPACK_NSIS_MUI_UNIICON "${CPACK_PACKAGE_ICON}")
 # Relative to the install dir: CPack's NSIS template prefixes $INSTDIR itself.
@@ -1409,4 +1409,6 @@ DeleteRegValue HKLM "Software\Classes\.stp\OpenWithProgids" "OrcaSlicer.CustomBe
 System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 ]=])
 endif()
+# Preserve quotes and registry path separators in generated CPackConfig.cmake.
+set(CPACK_VERBATIM_VARIABLES TRUE)
 include(CPack)
