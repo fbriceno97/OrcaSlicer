@@ -1,0 +1,34 @@
+name: Windows version resource diagnostic
+on:
+  push:
+    branches: [fix/windows-identity-check]
+permissions:
+  contents: read
+jobs:
+  resource-check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Compare resource encodings
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          'int main() {return 0;}' | Set-Content tiny.cpp
+          $rc = Get-Content src/dev-utils/platform/msw/OrcaSlicer.rc.in -Raw
+          $rc = $rc.Replace('@SLIC3R_VERSION@', '2,5,0,0').Replace('@SLIC3R_BUILD_ID@', '2.5.0-dev')
+          $rc = ($rc -split "\r?\n" | Where-Object { $_ -notmatch 'ICON|manifest' }) -join "`n"
+          foreach ($variant in @('original','terminated')) {
+            $content = $rc
+            if ($variant -eq 'terminated') {
+              $content = [regex]::Replace($content, '(VALUE "[^"]+", ")([^"]*)(")', '$1$2\0$3')
+            }
+            $content | Set-Content "$variant.rc"
+            rc.exe /fo "$variant.res" "$variant.rc"
+            if ($LASTEXITCODE -ne 0) { throw 'Resource compile failed' }
+            cl.exe /nologo tiny.cpp "$variant.res" "/Fe:$variant.exe"
+            if ($LASTEXITCODE -ne 0) { throw 'Link failed' }
+            $info = (Get-Item "$variant.exe").VersionInfo
+            Write-Host "VARIANT=$variant Description=[$($info.FileDescription)] Product=[$($info.ProductName)]"
+            $info | Format-List *
+          }
