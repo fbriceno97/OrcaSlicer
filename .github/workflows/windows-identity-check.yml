@@ -16,15 +16,15 @@ jobs:
           $ErrorActionPreference = 'Stop'
           'int main() {return 0;}' | Set-Content tiny.cpp
           $rc = Get-Content src/dev-utils/platform/msw/OrcaSlicer.rc.in -Raw
-          $rc = $rc.Replace('@SLIC3R_VERSION@', '2,5,0,0').Replace('@SLIC3R_BUILD_ID@', '2.5.0-dev')
+          $rc = $rc.Replace('@SLIC3R_VERSION@', '02.08.01.55').Replace('@SLIC3R_BUILD_ID@', '')
           $rc = ($rc -split "\r?\n" | Where-Object { $_ -notmatch 'ICON|manifest' }) -join "`n"
-          foreach ($variant in @('original','terminated')) {
+          foreach ($variant in @('original','fixed')) {
             $content = $rc
-            if ($variant -eq 'terminated') {
-              $content = [regex]::Replace($content, '(VALUE "[^"]+", ")([^"]*)(")', '$1$2\0$3')
+            if ($variant -eq 'fixed') {
+              $content = $content.Replace('02.08.01.55', '2,5,0,0').Replace('VALUE "FileVersion", ""', 'VALUE "FileVersion", "2.5.0-dev"').Replace('VALUE "ProductVersion", ""', 'VALUE "ProductVersion", "2.5.0-dev"')
             }
             $content | Set-Content "$variant.rc"
-            & 'C:/Program Files/LLVM/bin/llvm-rc.exe' /fo "$variant.res" "$variant.rc"
+            rc.exe /fo "$variant.res" "$variant.rc"
             if ($LASTEXITCODE -ne 0) { throw 'Resource compile failed' }
             cl.exe /nologo tiny.cpp "$variant.res" "/Fe:$variant.exe"
             if ($LASTEXITCODE -ne 0) { throw 'Link failed' }
