@@ -524,6 +524,12 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "Installer failed: $($p.ExitCode)" }
           $exe = Join-Path $dest 'orca-slicer-custom-beta.exe'
           if (!(Test-Path $exe)) { throw 'Custom launcher missing' }
+          foreach ($candidate in @($exe, "$env:BUILD_DIR/OrcaSlicer/orca-slicer-custom-beta.exe", "$env:BUILD_DIR/src/Release/orca-slicer.exe")) {
+            $item = Get-Item $candidate
+            Write-Host "IDENTITY path=$($item.FullName) length=$($item.Length) description=[$($item.VersionInfo.FileDescription)] sha256=$((Get-FileHash $candidate).Hash)"
+            $item.VersionInfo | Format-List *
+          }
+          Get-Content "$env:BUILD_DIR/src/OrcaSlicer.rc"
           if ((Get-Item $exe).VersionInfo.FileDescription -ne 'OrcaSlicer Custom Beta') {
             throw 'Incorrect executable display name'
           }
@@ -549,6 +555,18 @@ jobs:
           }
           if (!$found) { throw 'Custom app registration missing' }
           Write-Host 'PASS: installed launcher metadata and all six Open with associations'
+
+      - name: Preserve identity diagnostics on failure
+        if: failure() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-identity-diagnostics
+          path: |
+            ${{ env.BUILD_DIR }}/src/Release/orca-slicer*.exe
+            ${{ env.BUILD_DIR }}/src/OrcaSlicer.rc
+            ${{ env.BUILD_DIR }}/CPackConfig.cmake
+            ${{ env.BUILD_DIR }}/_CPack_Packages/win64/NSIS/project.nsi
+          retention-days: 5
 
       - name: Pack app
         if: runner.os == 'Windows'
