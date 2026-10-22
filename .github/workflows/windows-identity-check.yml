@@ -24,7 +24,7 @@ jobs:
               $content = [regex]::Replace($content, '(VALUE "[^"]+", ")([^"]*)(")', '$1$2\0$3')
             }
             $content | Set-Content "$variant.rc"
-            rc.exe /fo "$variant.res" "$variant.rc"
+            & 'C:/Program Files/LLVM/bin/llvm-rc.exe' /fo "$variant.res" "$variant.rc"
             if ($LASTEXITCODE -ne 0) { throw 'Resource compile failed' }
             cl.exe /nologo tiny.cpp "$variant.res" "/Fe:$variant.exe"
             if ($LASTEXITCODE -ne 0) { throw 'Link failed' }
