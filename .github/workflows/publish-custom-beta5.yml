@@ -68,3 +68,5 @@ jobs:
               assert a["digest"] == "sha256:"+hashlib.sha256(p.read_bytes()).hexdigest()
           subprocess.run(["gh","release","edit",tag,"--draft=false"], check=True)
           
+
+# Retry publication after workflows were re-enabled.
