@@ -58,9 +58,8 @@ jobs:
           sums = "".join(hashlib.sha256(p.read_bytes()).hexdigest()+"  "+p.name+"\n" for p in sorted(out.iterdir()))
           (out/"SHA256SUMS.txt").write_text(sums)
           pathlib.Path("release-notes.md").write_text("Windows x64 only. Publishes the exact installer tested and confirmed working by Felix; application binaries were not rebuilt.\n\n## New in Beta 5\n- Distinct **OrcaSlicer Custom Beta** Windows executable identity and Start Menu shortcut.\n- Separate **Open with** registration for 3MF, STL, OBJ, AMF, STEP and STP.\n- Correct Windows version metadata so the custom application name displays reliably.\n- Keeps the existing custom install location and existing settings/login paths.\n- Retains Beta 4's overlapping-surface painting fix and existing Bambu Connect integration.\n\n## Validation\nWindows x64 compilation, installer creation, installed Windows identity/association verification, and painting/core regression tests passed. The user confirmed the resulting build works.\n\nSource commit: 634f6c9a906ad6c023893ebb3e862274535480a0\nBuild: https://github.com/fbriceno97/OrcaSlicer/actions/runs/39714355349\n\n## Downloads\n- setup.exe: installer with Windows Open with registration.\n- portable.zip: extract to a folder; does not install file associations.\n- SHA256SUMS.txt: SHA-256 checksums.\n\nIf you already installed the tested build from run 39714355349, no reinstall is necessary.\n\nFull painting parity across every model and fresh physical-printer testing are not claimed. The separately reported intermittent slicing access violation is not fixed by this packaging release. Linux, macOS and Windows ARM64 are not covered.")
-          subprocess.run(["gh","release","create",tag,"--target",sha,"--title","OrcaSlicer Custom Beta 5 — Windows x64","--notes-file","release-notes.md","--prerelease","--draft"], check=True)
-          subprocess.run(["gh","release","upload",tag]+[str(p) for p in sorted(out.iterdir())], check=True)
-          rel = api("releases/tags/"+tag)
+          rel = api("releases/421343464")
+          assert rel["tag_name"] == tag and rel["target_commitish"] == sha and rel["draft"]
           assert len(rel["assets"]) == 3
           for p in out.iterdir():
               a = next(a for a in rel["assets"] if a["name"] == p.name)
