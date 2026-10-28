@@ -1,0 +1,45 @@
+name: Stage Unlayered geometry on experimental branch
+
+on:
+  push:
+    branches:
+      - feature/unlayered-wave-nonplanar
+    paths:
+      - .github/workflows/stage-unlayered-geometry.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: unlayered-geometry-experimental
+  cancel-in-progress: false
+
+jobs:
+  source-port:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: Checkout custom Beta 5 branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: true
+      - name: Stage feature-related source changes from pinned Unlayered tag
+        run: python3 scripts/stage_unlayered_features.py
+      - name: Inspect resulting patch without claiming it is print-safe
+        run: |
+          git diff --cached --check
+          git diff --cached --stat
+          printf '%s\n' 'EXPERIMENTAL: no built executable; no printer tests performed.'
+      - name: Commit candidate only to experimental branch
+        run: |
+          if git diff --cached --quiet; then
+            echo 'No new source changes to commit'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'WIP: port pinned Unlayered wave and multiplanar slicing source (not validated)'
+          git push origin HEAD:feature/unlayered-wave-nonplanar
