@@ -6,6 +6,7 @@ on:
       - feature/unlayered-wave-nonplanar
     paths:
       - .github/workflows/stage-unlayered-geometry.yml
+      - scripts/stage_unlayered_features.py
   workflow_dispatch:
 
 permissions:
@@ -26,7 +27,7 @@ jobs:
           fetch-depth: 0
           filter: blob:none
           persist-credentials: true
-      - name: Stage feature-related source changes from pinned Unlayered tag
+      - name: Stage new wave and nonplanar source modules from pinned Unlayered tag
         run: python3 scripts/stage_unlayered_features.py
       - name: Inspect resulting patch without claiming it is print-safe
         run: |
