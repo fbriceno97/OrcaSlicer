@@ -74,26 +74,39 @@ def main():
         if not base:
             raise RuntimeError("No shared OrcaSlicer ancestor; refusing force-import")
         report("### Unlayered source candidate from "+TAG+"\nCommon ancestor: "+base)
-        raw = cmd("git", "diff", "--name-only", "-z", base, source, "--").stdout
+        # Stage NEW self-contained feature sources only. The full patch was
+        # intentionally tried first and had extensive conflicts with our Orca
+        # base; overwriting existing paths would lose Bambu customizations.
+        raw = cmd("git", "diff", "--diff-filter=A", "--name-only", "-z",
+                  base, source, "--").stdout
         paths = [x.decode() for x in raw.split(b"\0") if x]
+        features = ("WaveOverhangs", "CutPlane", "Skeleton", "HotendCollision",
+                    "Trunnion", "SegmentSupport", "Nonplanar", "nonplanar",
+                    "wave_overhangs", "segment_", "cut_plane",
+                    "virtual_tilt", "multiplanar")
         chosen = sorted(p for p in paths if
-                        (p.startswith(PREFIXES) or p in FILES) and
-                        not p.startswith(SKIP_PREFIXES) and p not in SKIP_FILES)
-        if not chosen:
-            raise RuntimeError("No importable changes for pinned tag")
-        report("Candidate feature-related file changes: "+str(len(chosen))+
-               ". Brand, cloud, account and custom painting paths excluded.")
-        patch = cmd("git", "diff", "--binary", "--full-index",
-                    base, source, "--", *chosen).stdout
-        result = cmd("git", "apply", "--3way", "--index", "--whitespace=nowarn",
-                     "-", check=False, data=patch)
-        if result.returncode:
-            report("**Source conflicts: port was not auto-committed.**")
-            print(result.stdout.decode(errors="replace"), file=sys.stderr)
-            print(result.stderr.decode(errors="replace"), file=sys.stderr)
-            cmd("git", "reset", "--hard", "HEAD")
-            raise RuntimeError("Unlayered patch needs manual conflict resolution")
-        cmd("git", "diff", "--cached", "--check")
+                        (p.startswith(PREFIXES) or p in FILES)
+                        and not p.startswith(SKIP_PREFIXES)
+                        and p not in SKIP_FILES
+                        and any(word in p for word in features)
+                        and pathlib.Path(p).suffix.lower() in
+                            (".cpp", ".hpp", ".h", ".py", ".html"))
+        imported = []
+        skipped = []
+        for p in chosen:
+            target = pathlib.Path(p)
+            if target.exists():
+                skipped.append(p)
+                continue
+            blob = cmd("git", "show", source+":"+p).stdout
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(blob)
+            cmd("git", "add", "--", p)
+            imported.append(p)
+        report("Imported "+str(len(imported))+" previously absent geometry source files; "
+               "skipped "+str(len(skipped))+" paths already in our fork.")
+        report("The modified Orca core, CMake wiring, and Bambu safety gates "
+               "still require a manual conflict-resolution pass. No code is enabled.")
         for filename in ("WaveOverhangs.cpp", "WaveOverhangs.hpp"):
             if not pathlib.Path("src/libslic3r/WaveOverhangs", filename).is_file():
                 raise RuntimeError("Missing generator file: "+filename)
