@@ -1,4 +1,5 @@
 #include "GLGizmoCutPlanes.hpp"
+#include "slic3r/GUI/Event.hpp"
 #include "GLGizmoCut.hpp"
 #include "GLGizmosCommon.hpp"
 #include "GLGizmoBase.hpp"

@@ -13,11 +13,13 @@
 #include <cereal/archives/binary.hpp>
 
 #include <memory>
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <vector>
 #include <utility>
 #include <wx/event.h>
+#include <wx/string.h>
 
 namespace Slic3r {
 
