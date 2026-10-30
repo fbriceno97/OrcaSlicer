@@ -51,6 +51,18 @@ jobs:
         shell: powershell
         run: .\scripts\test_build_win.ps1
 
+  windows-x64-clearance-tests:
+    name: Windows x64 hotend clearance geometry tests
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure production geometry tests
+        run: cmake -S tests/hotend_envelope -B build/hotend-envelope -A x64
+      - name: Compile production geometry tests
+        run: cmake --build build/hotend-envelope --config Release --parallel 4
+      - name: Run clearance regression tests
+        run: ctest --test-dir build/hotend-envelope -C Release --no-tests=error --output-on-failure --output-junit hotend-results.xml
+
   windows-x64:
     name: Windows x64 compiler and installer artifact
     needs: windows-script-check
