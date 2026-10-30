@@ -13,6 +13,7 @@
 #include <boost/filesystem/operations.hpp>
 
 #include <limits>
+#include <fstream>
 #include <stdexcept>
 
 using namespace Slic3r;
@@ -119,4 +120,25 @@ TEST_CASE("Rejected non-planar exports leave neither printable output nor a temp
     CHECK_THROWS_AS(print.export_gcode(output.string(), preview_requested ? &preview : nullptr), SlicingError);
     CHECK_FALSE(boost::filesystem::exists(output.string()));
     CHECK_FALSE(boost::filesystem::exists(output.string() + ".tmp"));
+}
+
+TEST_CASE("Edited G-code must remain readable and retain valid section metadata", "[HotendCollision][Print]")
+{
+    Print print;
+    Model model;
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}});
+    print.apply(model, config);
+    ScopedTemporaryFile edited(".gcode");
+    {
+        std::ofstream out(edited.string());
+        REQUIRE(out.is_open());
+        out << "G90\n; SEGMENT_ID:invalid\nG1 X1 Y1 Z1 F600\n";
+    }
+    CHECK_THROWS_AS(print.validate_nonplanar_gcode_file(edited.string()), SlicingError);
+    boost::filesystem::remove(edited.string());
+    CHECK_THROWS(print.validate_nonplanar_gcode_file(edited.string()));
+    config.set_deserialize_strict({{"enable_nonplanar", "0"}});
+    print.apply(model, config);
+    CHECK_NOTHROW(print.validate_nonplanar_gcode_file(edited.string()));
 }

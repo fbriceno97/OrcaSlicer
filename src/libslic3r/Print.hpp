@@ -1085,6 +1085,7 @@ public:
     std::string         export_gcode(const std::string& path_template, GCodeProcessorResult* result, ThumbnailsGeneratorCallback thumbnail_cb = nullptr);
     // Called before the temporary G-code becomes an exportable file, also for CLI exports.
     void                validate_nonplanar_gcode(const GCodeProcessorResult &result) const;
+    void                validate_nonplanar_gcode_file(const std::string &path) const;
     //return 0 means successful
     int                 export_cached_data(const std::string& dir_path, bool with_space=false) override;
     int                 load_cached_data(const std::string& directory) override;

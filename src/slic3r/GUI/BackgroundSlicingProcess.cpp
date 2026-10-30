@@ -864,6 +864,12 @@ void BackgroundSlicingProcess::finalize_gcode()
                 BOOST_LOG_TRIVIAL(error) << "Failed to remove temp file " << output_path << ": " << ex.what();
             }
     };
+    try {
+        m_fff_print->validate_nonplanar_gcode_file(output_path);
+    } catch (...) {
+        remove_post_processed_temp_file();
+        throw;
+    }
     m_print->set_status(99, _utf8(L("Successfully executed post-processing script")));
 
     // FIXME localize the messages
@@ -925,6 +931,7 @@ void BackgroundSlicingProcess::export_gcode()
     // Perform the final post-processing of the export path by applying the print statistics over the file name.
     std::string export_path = m_fff_print->print_statistics().finalize_output_path(m_export_path);
     std::string output_path = m_temp_output_path;
+    m_fff_print->validate_nonplanar_gcode_file(output_path);
 
     // FIXME localize the messages
     std::string error_message;
@@ -1004,6 +1011,13 @@ void BackgroundSlicingProcess::prepare_upload()
                                              m_fff_print->full_print_config());
                 if (post_process)
                     m_upload_job.upload_data.upload_path = output_name_str;
+            }
+            try {
+                m_fff_print->validate_nonplanar_gcode_file(source_path.string());
+            } catch (...) {
+                boost::system::error_code ignored;
+                boost::filesystem::remove(source_path, ignored);
+                throw;
             }
         }
     } else {

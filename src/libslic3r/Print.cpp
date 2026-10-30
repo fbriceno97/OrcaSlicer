@@ -3888,6 +3888,17 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
 // The export_gcode may die for various reasons (fails to process filename_format,
 // write error into the G-code, cannot execute post-processing scripts).
 // It is up to the caller to show an error message.
+void Print::validate_nonplanar_gcode_file(const std::string &path) const
+{
+    if (!m_config.enable_nonplanar.value)
+        return;
+    GCodeProcessor processor;
+    const Vec3d origin = get_plate_origin();
+    processor.set_xy_offset(origin.x(), origin.y());
+    processor.process_file(path);
+    validate_nonplanar_gcode(processor.get_result());
+}
+
 void Print::validate_nonplanar_gcode(const GCodeProcessorResult &result) const
 {
     if (!m_config.enable_nonplanar.value)
@@ -5656,6 +5667,8 @@ void Print::reload_gcode_moves(GCodeProcessorResult* result) const
     try {
         processor.process_file(result->filename);
     } catch (const std::exception& ex) {
+        if (m_config.enable_nonplanar.value)
+            throw SlicingError(_u8L("The edited non-planar G-code could not be read for collision checks."));
         // The edited file is what gets printed, so failing to preview it must not fail the slice.
         BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": cannot re-read the G-code file " << result->filename << ": " << ex.what();
         std::lock_guard<std::mutex> lock(result->result_mutex);
