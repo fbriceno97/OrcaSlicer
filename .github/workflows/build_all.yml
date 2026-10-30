@@ -38,7 +38,8 @@ concurrency:
   # A same-repository push and its PR synchronization validate the same branch.
   # Share the group so they do not build the entire Windows application twice.
   group: custom-win-x64-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: true
+  # Finish active compilation and tests; retain only the newest pending revision.
+  cancel-in-progress: false
 
 jobs:
   windows-script-check:
