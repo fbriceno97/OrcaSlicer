@@ -2102,11 +2102,14 @@ ModelVolumeType type_from_string(const std::string &s)
             "source_offset_y",
             "source_offset_z",
             "extruder",
-            "modifier"
+            "modifier",
+            "layer_rotation_b",
+            "layer_rotation_c"
         };
 
         auto itor = std::find(valid_keys.begin(), valid_keys.end(), key);
-        if (itor == valid_keys.end() && !(type == VOLUME_TYPE && boost::starts_with(key, PRECISE_SEAM_CONFIG_PREFIX))) {
+        const bool cut_plane_metadata = type == OBJECT_TYPE && key == cut_planes_metadata_key;
+        if (itor == valid_keys.end() && !cut_plane_metadata && !(type == VOLUME_TYPE && boost::starts_with(key, PRECISE_SEAM_CONFIG_PREFIX))) {
             // do nothing if not valid keys
             return true;
         }

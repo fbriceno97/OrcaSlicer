@@ -222,8 +222,12 @@ TEST_CASE("Cut-plane metadata coexists with precise seam modifiers in both 3MF f
 {
     const auto backend = GENERATE(Backend::Bbs, Backend::Prusa);
     const bool enabled = GENERATE(false, true);
+    INFO("backend=" << (backend == Backend::Bbs ? "Bambu/Orca" : "Prusa") << ", enabled=" << enabled);
     Scene source;
     source.populate(false);
+    source.model.objects.front()->config.set_key_value("layer_rotation_b", new ConfigOptionFloat(-20.));
+    source.model.objects.front()->config.set_key_value("layer_rotation_c", new ConfigOptionFloat(30.));
+    source.model.objects.front()->volumes.front()->config.set_key_value("layer_rotation_b", new ConfigOptionFloat(10.));
     CutPlaneStack &stack = source.model.objects.front()->cut_planes;
     stack.enabled = enabled;
     stack.user_ordered = true;
@@ -242,8 +246,16 @@ TEST_CASE("Cut-plane metadata coexists with precise seam modifiers in both 3MF f
     load(path.string(), backend, destination);
     REQUIRE(destination.model.objects.size() == 1);
     const ModelObject &restored = *destination.model.objects.front();
+    INFO("expected planes: " << cut_plane_stack_to_json(stack));
+    INFO("restored planes: " << cut_plane_stack_to_json(restored.cut_planes));
     CHECK(restored.cut_planes == stack);
+    REQUIRE(restored.config.has("layer_rotation_b"));
+    REQUIRE(restored.config.has("layer_rotation_c"));
+    CHECK_THAT(restored.config.opt_float("layer_rotation_b"), Catch::Matchers::WithinAbs(-20., 1e-9));
+    CHECK_THAT(restored.config.opt_float("layer_rotation_c"), Catch::Matchers::WithinAbs(30., 1e-9));
     REQUIRE(restored.volumes.size() == 2);
+    REQUIRE(restored.volumes.front()->config.has("layer_rotation_b"));
+    CHECK_THAT(restored.volumes.front()->config.opt_float("layer_rotation_b"), Catch::Matchers::WithinAbs(10., 1e-9));
     CHECK(restored.volumes[1]->type() == ModelVolumeType::PRECISE_SEAM_CENTER);
     check_config(*restored.volumes[1]);
     check_geometry(*source.model.objects.front()->volumes[0], *restored.volumes[0]);
