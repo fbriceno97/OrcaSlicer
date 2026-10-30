@@ -35,7 +35,9 @@ permissions:
   actions: read
 
 concurrency:
-  group: custom-win-x64-${{ github.event.pull_request.number || github.ref }}
+  # A same-repository push and its PR synchronization validate the same branch.
+  # Share the group so they do not build the entire Windows application twice.
+  group: custom-win-x64-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 jobs:
