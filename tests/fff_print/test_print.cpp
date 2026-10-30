@@ -49,6 +49,7 @@
 #include "test_helpers.hpp"
 #include "test_utils.hpp"
 #include "libslic3r/CutPlanes.hpp"
+#include "libslic3r/CutPlaneSegmentation.hpp"
 
 #include <algorithm>
 #include <boost/algorithm/string/predicate.hpp>
@@ -160,7 +161,10 @@ TEST_CASE("Cut sections retain separate instance identities and reuse unchanged 
     for (const auto &entry : sections_by_instance)
         CHECK(entry.second == expected_sections);
     print.apply(model, config);
-    CHECK(print.objects() == original_plan);
+    REQUIRE(print.objects().size() == original_plan.size());
+    size_t plan_index = 0;
+    for (const PrintObject *section : print.objects())
+        CHECK(section == original_plan[plan_index++]);
     CHECK_THROWS_AS(print.process(), SlicingError);
 
     config.set_deserialize_strict({{"enable_nonplanar", "0"}});
