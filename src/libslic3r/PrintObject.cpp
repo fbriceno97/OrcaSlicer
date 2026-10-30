@@ -4264,8 +4264,12 @@ void PrintObject::update_slicing_parameters()
               object_height = hr.object_height;
               belt_floor    = hr.floor_params;
           }
+          // Section extents were measured after the instance transform, including
+          // shrinkage compensation. Their own layer schedule starts at the rebase.
+          if (m_segment)
+              object_height = std::max(m_segment->build_z_max, m_segment->support_z_max) - m_segment->slice_z_base();
           m_slicing_params = SlicingParameters::create_from_config(pcfg, m_config, object_height,
-                                                                   this->object_extruders(), this->print()->shrinkage_compensation());
+              this->object_extruders(), m_segment ? Vec3d(Vec3d::Ones()) : this->print()->shrinkage_compensation());
           // Populate belt floor parameters into slicing params for support clipping.
           m_slicing_params.belt_floor_shear_factor = belt_floor.shear_factor;
           m_slicing_params.belt_floor_from_axis    = belt_floor.from_axis;

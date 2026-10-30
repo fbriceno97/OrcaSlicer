@@ -170,6 +170,48 @@ TEST_CASE("Cut sections retain separate instance identities and reuse unchanged 
     CHECK(print.objects().front()->instances().size() == 2);
 }
 
+TEST_CASE("Section slices stay inside their model-space cut bounds", "[Print][CutPlaneSegmentation]")
+{
+    const bool tilted = GENERATE(false, true);
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"layer_height", "0.2"},
+        {"initial_layer_print_height", "0.2"}, {"zaa_enabled", "0"}});
+    Print print;
+    Model model;
+    init_print({cube(20.)}, print, model, config);
+    auto &stack = model.objects.front()->cut_planes;
+    stack.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(10., 10., 10.);
+    plane.normal = Vec3d(tilted ? 0.2 : 0., 0., 1.).normalized();
+    stack.planes.push_back(plane);
+    print.apply(model, config);
+    REQUIRE(print.objects().size() == 2);
+    for (PrintObject *section : print.objects()) {
+        REQUIRE(section->segment().has_value());
+        section->slice();
+        REQUIRE_FALSE(section->layers().empty());
+        const Transform3d to_model = section->trafo_sliced().inverse();
+        size_t checked_vertices = 0;
+        for (const Layer *layer : section->layers())
+            for (const LayerRegion *region : layer->regions())
+                for (const Surface &surface : region->slices.surfaces)
+                    for (const Point &point : surface.expolygon.contour.points) {
+                        const Vec3d local = to_model * Vec3d(unscale<double>(point.x()), unscale<double>(point.y()), layer->slice_z);
+                        for (const CutSegmentClip &clip : section->segment()->clips)
+                            CHECK(clip.normal.dot(local) <= clip.offset + 0.01);
+                        ++checked_vertices;
+                    }
+        CHECK(checked_vertices > 0);
+        if (!tilted) {
+            CHECK(section->layers().size() == 50);
+            CHECK_THAT(section->layers().back()->print_z, Catch::Matchers::WithinAbs(10., 0.001));
+        }
+    }
+    // Mesh slicing is exercised directly until world-space emission is integrated.
+    CHECK_THROWS_AS(print.process(), SlicingError);
+}
+
 TEST_CASE("Timelapse g-code is emitted once per layer for Bambu and non-Bambu printers", "[Print][Regression]")
 {
     struct PrinterCase {

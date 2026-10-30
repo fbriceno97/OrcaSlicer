@@ -28,6 +28,8 @@
 #include "Point.hpp"
 #include "Polygon.hpp"
 #include "Print.hpp"
+#include "CutPlaneSegmentation.hpp"
+#include <Eigen/Geometry>
 #include "BeltTransform.hpp"
 #include "BeltSliceStrategy.hpp"
 #include "Geometry.hpp"
@@ -185,7 +187,8 @@ static std::vector<VolumeSlices> slice_volumes_inner(
     const std::vector<PrintObjectRegions::LayerRangeRegions> &layer_ranges,
     const std::vector<float>                                 &zs,
     const std::function<void()>                              &throw_on_cancel_callback,
-    double                                                   *out_belt_min_z = nullptr)
+    double                                                   *out_belt_min_z = nullptr,
+    bool                                                      apply_preslice_transforms = true)
 {
     model_volumes_sort_by_id(model_volumes);
 
@@ -203,7 +206,8 @@ static std::vector<VolumeSlices> slice_volumes_inner(
     // Pre-slice mesh transforms: axis remap (standalone — works without belt
     // mode), belt rotation, and the per-object Z-shift.  Owned by BeltSliceStrategy
     // so this belt/remap-specific logic stays out of the generic slicing pipeline.
-    BeltSliceStrategy::apply_preslice_transforms(params_base.trafo, print_config, model_volumes, out_belt_min_z);
+    if (apply_preslice_transforms)
+        BeltSliceStrategy::apply_preslice_transforms(params_base.trafo, print_config, model_volumes, out_belt_min_z);
     //BBS: 0.0025mm is safe enough to simplify the data to speed slicing up for high-resolution model.
     //Also has on influence on arc fitting which has default resolution 0.0125mm.
     params_base.resolution = print_config.resolution <= 0.001 ? 0.0f : 0.0025;
@@ -1359,11 +1363,16 @@ void PrintObject::slice_volumes()
 
     std::vector<float>                   slice_zs      = zs_from_layers(m_layers);
     std::vector<VolumeSlices> objSliceByVolume;
+    ModelVolumePtrs volumes = this->model_object()->volumes;
+    if (m_segment)
+        volumes.erase(std::remove_if(volumes.begin(), volumes.end(), [this](const ModelVolume *volume) {
+            return !segment_includes_volume(&*m_segment, *volume);
+        }), volumes.end());
     if (!slice_zs.empty()) {
         objSliceByVolume = slice_volumes_inner(
-            print->config(), this->config(), this->trafo_centered(),
-            this->model_object()->volumes, m_shared_regions->layer_ranges, slice_zs, throw_on_cancel_callback,
-            &m_belt_min_z);
+            print->config(), this->config(), m_segment ? this->trafo_sliced() : this->trafo_centered(),
+            volumes, m_shared_regions->layer_ranges, slice_zs, throw_on_cancel_callback,
+            &m_belt_min_z, !m_segment.has_value());
     }
 
     //BBS: "model_part" volumes are grouded according to their connections
@@ -1374,13 +1383,33 @@ void PrintObject::slice_volumes()
     firstLayerObjSliceByVolume = objSliceByVolume;
 
     std::vector<std::vector<ExPolygons>> region_slices =
-        slices_to_regions(print->config(), *this, this->model_object()->volumes, *m_shared_regions, slice_zs,
+        slices_to_regions(print->config(), *this, volumes, *m_shared_regions, slice_zs,
                           std::move(objSliceByVolume), PrintObject::clip_multipart_objects, throw_on_cancel_callback);
 
     for (size_t region_id = 0; region_id < region_slices.size(); ++ region_id) {
         std::vector<ExPolygons> &by_layer = region_slices[region_id];
-        for (size_t layer_id = 0; layer_id < by_layer.size(); ++ layer_id)
+        for (size_t layer_id = 0; layer_id < by_layer.size(); ++ layer_id) {
+            if (m_segment && !by_layer[layer_id].empty()) {
+                const Transform3d frame = this->trafo_sliced();
+                for (const CutSegmentClip &clip : m_segment->clips) {
+                    const Vec3d normal = frame.linear().inverse().transpose() * clip.normal;
+                    double limit = clip.offset + normal.dot(frame.translation()) - normal.z() * slice_zs[layer_id];
+                    if (clip.role == CutClipRole::Bed)
+                        limit -= 0.5 * m_layers[layer_id]->height * std::abs(normal.z());
+                    if (normal.head<2>().norm() < EPSILON) {
+                        if (limit < -EPSILON)
+                            by_layer[layer_id].clear();
+                    } else {
+                        const BoundingBox bounds = get_extents(by_layer[layer_id]);
+                        by_layer[layer_id] = clip_expolygons_by_half_plane(std::move(by_layer[layer_id]),
+                            normal.head<2>(), limit, bounds);
+                    }
+                    if (by_layer[layer_id].empty())
+                        break;
+                }
+            }
             m_layers[layer_id]->regions()[region_id]->slices.append(std::move(by_layer[layer_id]), stInternal);
+        }
     }
     region_slices.clear();
 
@@ -1737,6 +1766,15 @@ ExPolygons PrintObject::_shrink_contour_holes(double contour_delta, double hole_
 
 Transform3d PrintObject::trafo_sliced() const
 {
+    if (m_segment) {
+        const Vec3d normal = (m_trafo.linear().inverse().transpose() * m_segment->build_normal).normalized();
+        const Matrix3d rotation = Eigen::Quaterniond::FromTwoVectors(normal, Vec3d::UnitZ()).toRotationMatrix();
+        Transform3d frame(rotation);
+        frame = frame * m_trafo;
+        frame.pretranslate(Vec3d(-unscale<double>(m_center_offset.x()), -unscale<double>(m_center_offset.y()),
+            -m_segment->slice_z_base()));
+        return frame;
+    }
     Transform3d trafo = this->trafo_centered();
     BeltSliceStrategy::apply_preslice_transforms(trafo, this->print()->config(), this->model_object()->volumes);
     return trafo;
