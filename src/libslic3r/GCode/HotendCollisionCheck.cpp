@@ -14,6 +14,10 @@
 #include <boost/log/trivial.hpp>
 #include <boost/geometry/geometries/point.hpp>
 #include <boost/geometry/geometries/box.hpp>
+#include <boost/geometry/core/cs.hpp>
+#include <boost/geometry/algorithms/intersects.hpp>
+#include <boost/geometry/index/parameters.hpp>
+#include <boost/geometry/index/predicates.hpp>
 #include <boost/geometry/index/rtree.hpp>
 
 #include <algorithm>
