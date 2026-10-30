@@ -2,11 +2,20 @@
 #define slic3r_GLGizmoCutPlanes_hpp_
 
 #include "GLGizmoCut.hpp"
+#include "GLGizmoBase.hpp"
+#include "slic3r/GUI/I18N.hpp"
 #include "slic3r/GUI/MeshUtils.hpp"
+#include "slic3r/GUI/GLModel.hpp"
 #include "libslic3r/CutPlaneSegmentation.hpp"
+#include "libslic3r/CutPlanes.hpp"
+#include "libslic3r/Point.hpp"
 
 #include <memory>
 #include <optional>
+#include <string>
+#include <vector>
+#include <utility>
+#include <wx/event.h>
 
 namespace Slic3r {
 
@@ -40,7 +49,7 @@ protected:
     bool on_init() override
     {
         const bool r   = GLGizmoCut3D::on_init();
-        m_shortcut_key = NO_SHORTCUT_KEY_VALUE;
+        m_shortcut.reset();
         return r;
     }
 
@@ -68,7 +77,7 @@ protected:
     // fainter square (the infinite-plane affordance). Mid-drag only the square is shown; the
     // surface snaps to the new cut on release.
     void render_cut_plane() override;
-    void perform_cut(const Selection &selection, bool surpress_diag) override { (void) selection; (void) surpress_diag; }
+    void perform_cut(const Selection &selection) override { (void) selection; }
 
     void render_cut_plane_input_window(CutConnectors &connectors, float x, float y, float bottom_limit) override;
     // The base reads the object clipper, which this gizmo never renders, so its answer is stale
@@ -83,6 +92,9 @@ public:
     std::string get_tooltip() const override;
 
 private:
+    bool nonplanar_printing_enabled() const;
+    bool virtual_5axis_enabled() const { return true; } // Ordinary three-axis toolhead stays upright.
+    double virtual_max_tilt_deg(double reach, std::optional<double> azimuth) const;
     // "Select face": while armed, the next click on the object snaps the editing plane to the
     // clicked triangle (hit point + face normal), then commits it if a stored plane is bound.
     // Works on the real merged mesh, so any face qualifies -- concave pockets included -- unlike

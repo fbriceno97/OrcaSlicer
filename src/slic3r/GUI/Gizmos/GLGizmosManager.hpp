@@ -102,6 +102,7 @@ public:
         Assembly,
         Simplify,
         BrimEars,
+        CutPlanes,
         //SlaSupports,
         // BBS
         //FaceRecognition,

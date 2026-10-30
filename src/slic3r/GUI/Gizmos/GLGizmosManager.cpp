@@ -18,6 +18,7 @@
 #include "slic3r/GUI/Gizmos/GLGizmoFuzzySkin.hpp"
 #include "slic3r/GUI/Gizmos/GLGizmoBrimEars.hpp"
 #include "slic3r/GUI/Gizmos/GLGizmoCut.hpp"
+#include "slic3r/GUI/Gizmos/GLGizmoCutPlanes.hpp"
 //#include "slic3r/GUI/Gizmos/GLGizmoFaceDetector.hpp"
 //#include "slic3r/GUI/Gizmos/GLGizmoHollow.hpp"
 #include "slic3r/GUI/Gizmos/GLGizmoSeam.hpp"
@@ -258,6 +259,7 @@ bool GLGizmosManager::init()
     m_gizmos.emplace_back(new GLGizmoAssembly(m_parent, m_is_dark ? "toolbar_assembly_dark.svg" : "toolbar_assembly.svg", EType::Assembly));
     m_gizmos.emplace_back(new GLGizmoSimplify(m_parent, "reduce_triangles.svg", EType::Simplify));
     m_gizmos.emplace_back(new GLGizmoBrimEars(m_parent, m_is_dark ? "toolbar_brimears_dark.svg" : "toolbar_brimears.svg", EType::BrimEars));
+    m_gizmos.emplace_back(new GLGizmoCutPlanes(m_parent, m_is_dark ? "toolbar_cut_dark.svg" : "toolbar_cut.svg", EType::CutPlanes));
     //m_gizmos.emplace_back(new GLGizmoSlaSupports(m_parent, "sla_supports.svg", sprite_id++));
     //m_gizmos.emplace_back(new GLGizmoFaceDetector(m_parent, "face recognition.svg", sprite_id++));
     //m_gizmos.emplace_back(new GLGizmoHollow(m_parent, "hollow.svg", sprite_id++));
@@ -604,8 +606,8 @@ bool GLGizmosManager::gizmo_event(SLAGizmoEventType action, const Vec2d& mouse_p
         return dynamic_cast<GLGizmoMeasure *>(m_gizmos[Measure].get())->gizmo_event(action, mouse_position, shift_down, alt_down, control_down);
     else if (m_current == Assembly)
         return dynamic_cast<GLGizmoAssembly *>(m_gizmos[Assembly].get())->gizmo_event(action, mouse_position, shift_down, alt_down, control_down);
-    else if (m_current == Cut)
-        return dynamic_cast<GLGizmoCut3D*>(m_gizmos[Cut].get())->gizmo_event(action, mouse_position, shift_down, alt_down, control_down);
+    else if (m_current == Cut || m_current == CutPlanes)
+        return dynamic_cast<GLGizmoCut3D*>(m_gizmos[m_current].get())->gizmo_event(action, mouse_position, shift_down, alt_down, control_down);
     else if (m_current == FuzzySkin)
         return dynamic_cast<GLGizmoFuzzySkin*>(m_gizmos[FuzzySkin].get())->gizmo_event(action, mouse_position, shift_down, alt_down, control_down);
     else if (m_current == TextureDisplacement)

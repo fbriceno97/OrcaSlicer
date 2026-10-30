@@ -16,6 +16,13 @@
 #include <wx/utils.h>
 #include "libslic3r/Geometry.hpp"
 #include "libslic3r/Model.hpp"
+#include "libslic3r/CutPlanes.hpp"
+#include "libslic3r/HotendEnvelope.hpp"
+#include "libslic3r/Config.hpp"
+#include "libslic3r/PrintConfig.hpp"
+#include "libslic3r/AppConfig.hpp"
+#include "libslic3r/Color.hpp"
+#include "libslic3r/Point.hpp"
 #include "libslic3r/PresetBundle.hpp"
 #include "libslic3r/Tesselate.hpp"
 #include "libslic3r/TriangleMesh.hpp"
@@ -26,12 +33,69 @@
 #include <algorithm>
 #include <numeric>
 #include <cmath>
+#include <cstddef>
+#include <limits>
+#include <memory>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "imgui/imgui_internal.h"
 #include <wx/filesys.h>
 #include <wx/filename.h>
 
 namespace Slic3r { namespace GUI {
+
+// Same print-order saturation fade as Unlayered-Slicer v0.1.7's chunk preview.
+// Keep the palette local until the ordinary Prepare view also renders segments.
+static ColorRGBA cut_segment_color(size_t index, size_t count, const ColorRGBA &filament)
+{
+    const float maximum = std::max({filament.r(), filament.g(), filament.b()});
+    const float minimum = std::min({filament.r(), filament.g(), filament.b()});
+    const float delta = maximum - minimum;
+    float saturation = maximum > 0.f ? delta / maximum : 0.f;
+    float value = maximum;
+    float hue = 0.f;
+    if (delta > 0.f) {
+        if (maximum == filament.r())
+            hue = 60.f * std::fmod((filament.g() - filament.b()) / delta + 6.f, 6.f);
+        else if (maximum == filament.g())
+            hue = 60.f * ((filament.b() - filament.r()) / delta + 2.f);
+        else
+            hue = 60.f * ((filament.r() - filament.g()) / delta + 4.f);
+    }
+    const float t = count > 1 ? float(std::min(index, count - 1)) / float(count - 1) : 0.f;
+    if (saturation - 0.25f >= 0.15f)
+        saturation += (0.25f - saturation) * t;
+    else
+        value += ((value > 0.5f ? 0.5f * value : 0.5f + 0.5f * value) - value) * t;
+    const float chroma = value * saturation;
+    const float x = chroma * (1.f - std::abs(std::fmod(hue / 60.f, 2.f) - 1.f));
+    const float m = value - chroma;
+    switch (int(hue / 60.f) % 6) {
+    case 0: return adjust_color_for_rendering(ColorRGBA(chroma + m, x + m, m, 1.f));
+    case 1: return adjust_color_for_rendering(ColorRGBA(x + m, chroma + m, m, 1.f));
+    case 2: return adjust_color_for_rendering(ColorRGBA(m, chroma + m, x + m, 1.f));
+    case 3: return adjust_color_for_rendering(ColorRGBA(m, x + m, chroma + m, 1.f));
+    case 4: return adjust_color_for_rendering(ColorRGBA(x + m, m, chroma + m, 1.f));
+    default: return adjust_color_for_rendering(ColorRGBA(chroma + m, m, x + m, 1.f));
+    }
+}
+
+bool GLGizmoCutPlanes::nonplanar_printing_enabled() const
+{
+    const auto &config = wxGetApp().preset_bundle->printers.get_edited_preset().config;
+    const auto *enabled = config.option<ConfigOptionBool>("enable_nonplanar");
+    return enabled != nullptr && enabled->value;
+}
+
+double GLGizmoCutPlanes::virtual_max_tilt_deg(double reach, std::optional<double> azimuth) const
+{
+    const auto &config = wxGetApp().preset_bundle->printers.get_edited_preset().config;
+    const auto *gantry = config.option<ConfigOptionFloat>("extruder_clearance_height_to_rod");
+    return virtual_tilt_limit_deg(HotendEnvelope::from_config(config), gantry ? gantry->value : 0., reach, azimuth);
+}
 
 static const ColorRGBA STORED_PLANE_COLOR     = { 0.9f, 0.9f, 0.9f, 0.25f };
 // Disabled planes: clearly distinct (muted red) and fainter, so their state is readable at a glance.
@@ -820,7 +884,7 @@ void GLGizmoCutPlanes::on_set_state()
         // The coloured chunk preview follows the app-wide "Color cut chunks" setting (View menu /
         // Preferences): one switch, persistent, in and out of the gizmo. The checkbox below writes
         // the same setting.
-        m_preview_chunks = wxGetApp().show_cut_chunk_colors();
+        m_preview_chunks = wxGetApp().app_config->get_bool("show_cut_chunk_colors");
         m_contours_dirty = m_merged_dirty = true;
         m_preview_valid = false;
         m_active_surface.reset();
@@ -1419,6 +1483,7 @@ void GLGizmoCutPlanes::render_cut_plane_input_window(CutConnectors &connectors, 
                 case CutSegmentationStatus::SegmentTooThin: note = _L("A segment would be thinner than the first layer."); break;
                 case CutSegmentationStatus::TooManyPlanes:  note = _L("Too many enabled planes (64 maximum)."); break;
                 case CutSegmentationStatus::NoGeometry:     note = _L("This object has no printable volume."); break;
+                case CutSegmentationStatus::InvalidGeometry: note = _L("Cut-plane geometry contains invalid coordinates or transforms."); break;
                 default:                                    note = _L("Cut planes are switched off for this object."); break;
                 }
             }
