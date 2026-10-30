@@ -21,6 +21,7 @@
 #include <numeric>
 #include <set>
 #include <string>
+#include <stdexcept>
 #include <utility>
 #include <stack>
 #include <vector>
@@ -905,6 +906,35 @@ bool is_point_inside_polygon_corner(const Point &a, const Point &b, const Point 
         //  * The Q is on the left side of the vector BA, and the Q is on the left side of the bisector of the oriented angle ABC.
         return (proj_a_on_bq_normal > 0. && proj_c_on_bq < proj_a_on_bq) || (proj_a_on_bq_normal <= 0. && proj_c_on_bq >= proj_a_on_bq);
     }
+}
+
+Eigen::Matrix3d layer_rotation_matrix(double b_deg, double c_deg)
+{
+    if (!std::isfinite(b_deg) || !std::isfinite(c_deg))
+        throw std::invalid_argument("Build orientation angles must be finite");
+    const double b = std::remainder(b_deg, 360.) * (PI / 180.);
+    const double c = std::remainder(c_deg, 360.) * (PI / 180.);
+    const double cb = std::cos(b), sb = std::sin(b), cc = std::cos(c), sc = std::sin(c);
+    Eigen::Matrix3d rotation;
+    rotation << cb * cc, -cb * sc, sb,
+                sc, cc, 0.,
+                -sb * cc, sb * sc, cb;
+    return rotation;
+}
+
+void bc_from_build_normal(const Vec3d &normal, double &b_deg, double &c_deg)
+{
+    if (!normal.allFinite() || normal.cwiseAbs().maxCoeff() == 0.)
+        throw std::invalid_argument("Build normal must be finite and nonzero");
+    // Scaling before hypot also handles large finite vectors without overflow.
+    const Vec3d scaled = normal / normal.cwiseAbs().maxCoeff();
+    c_deg = -std::atan2(scaled.y(), scaled.x()) * 180. / PI;
+    b_deg = -std::atan2(std::hypot(scaled.x(), scaled.y()), scaled.z()) * 180. / PI;
+}
+
+Vec3d build_normal_from_bc(double b_deg, double c_deg)
+{
+    return layer_rotation_matrix(b_deg, c_deg).transpose() * Vec3d::UnitZ();
 }
 
 }} // namespace Slic3r::Geometry

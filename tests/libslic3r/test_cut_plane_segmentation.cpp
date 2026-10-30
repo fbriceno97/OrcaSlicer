@@ -2,12 +2,32 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "libslic3r/CutPlaneSegmentation.hpp"
+#include "libslic3r/CutPlanes.hpp"
 #include "libslic3r/Geometry.hpp"
 #include "libslic3r/Model.hpp"
 #include "libslic3r/TriangleMesh.hpp"
+#include "libslic3r/Point.hpp"
+#include "libslic3r/PrintConfig.hpp"
+
+#include <cmath>
+#include <initializer_list>
+#include <limits>
+#include <stdexcept>
+#include <utility>
+#include <vector>
 
 using namespace Slic3r;
 using Catch::Matchers::WithinAbs;
+
+TEST_CASE("Build orientation rejects zero and nonfinite normals", "[CutPlaneSegmentation]")
+{
+    double b = 0., c = 0.;
+    CHECK_THROWS_AS(Geometry::bc_from_build_normal(Vec3d::Zero(), b, c), std::invalid_argument);
+    CHECK_THROWS_AS(Geometry::bc_from_build_normal(Vec3d(std::numeric_limits<double>::quiet_NaN(), 0., 1.), b, c),
+                    std::invalid_argument);
+    CHECK_THROWS_AS(Geometry::layer_rotation_matrix(std::numeric_limits<double>::infinity(), 0.),
+                    std::invalid_argument);
+}
 
 // Build a one-object model with the given part meshes and a single default instance.
 // Planes are authored in the object-local frame == the meshes' own coordinates
@@ -29,6 +49,32 @@ static CutPlane plane_at(const Vec3d &point, const Vec3d &normal)
     cp.point  = point;
     cp.normal = normal;
     return cp;
+}
+
+TEST_CASE("Copying an object preserves its cut planes without sharing their storage", "[CutPlaneSegmentation]")
+{
+    Model source;
+    ModelObject *original = make_object(source, {make_cube(20., 20., 20.)});
+    original->cut_planes.enabled = true;
+    original->cut_planes.user_ordered = true;
+    original->cut_planes.planes.push_back(plane_at(Vec3d(10., 10., 10.), Vec3d::UnitZ()));
+    Model destination;
+    ModelObject *copy = destination.add_object(*original);
+    CHECK(copy->cut_planes == original->cut_planes);
+    copy->cut_planes.planes.front().point.z() = 12.;
+    CHECK_THAT(original->cut_planes.planes.front().point.z(), WithinAbs(10., 1e-9));
+}
+
+TEST_CASE("Invalid cut-plane coordinates reject the partition with an explicit status", "[CutPlaneSegmentation]")
+{
+    Model model;
+    ModelObject *object = make_object(model, {make_cube(20., 20., 20.)});
+    object->cut_planes.enabled = true;
+    object->cut_planes.planes.push_back(plane_at(Vec3d(10., 10., 10.), Vec3d::UnitZ()));
+    object->cut_planes.planes.front().point.x() = std::numeric_limits<double>::quiet_NaN();
+    CutSegmentationStatus status = CutSegmentationStatus::Ok;
+    CHECK(derive_cut_segments(*object, Transform3d::Identity(), 0., &status).empty());
+    CHECK(status == CutSegmentationStatus::InvalidGeometry);
 }
 
 TEST_CASE("B/C angles and build normal round-trip", "[cutplanes]") {

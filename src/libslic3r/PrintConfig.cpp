@@ -1102,6 +1102,24 @@ void PrintConfigDef::init_common_params()
     def->min = 0;
     def->set_default_value(new ConfigOptionFloat(INITIAL_LAYER_HEIGHT));
 
+    // Keep per-part build directions as explicit experimental data. They are
+    // not defaults in a static print config or exposed in the settings UI yet.
+    def = this->add("layer_rotation_b", coFloat);
+    def->label = L("Section build rotation around Y");
+    def->sidetext = L("degrees");
+    def->min = -180.;
+    def->max = 180.;
+    def->mode = comDevelop;
+    def->set_default_value(new ConfigOptionFloat(0.));
+
+    def = this->add("layer_rotation_c", coFloat);
+    def->label = L("Section build rotation around Z");
+    def->sidetext = L("degrees");
+    def->min = -180.;
+    def->max = 180.;
+    def->mode = comDevelop;
+    def->set_default_value(new ConfigOptionFloat(0.));
+
     def = this->add("printable_height", coFloat);
     def->label = L("Printable height");
     def->tooltip = L("This is the maximum printable height which is limited by the height of the build area.");

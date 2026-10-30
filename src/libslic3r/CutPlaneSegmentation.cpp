@@ -1,15 +1,34 @@
 #include "CutPlaneSegmentation.hpp"
+#include "CutPlanes.hpp"
 
 #include "ClipperUtils.hpp"
+#include "BoundingBox.hpp"
+#include "ExPolygon.hpp"
 #include "Geometry.hpp"
 #include "Model.hpp"
+#include "ObjectID.hpp"
+#include "Point.hpp"
+#include "Polygon.hpp"
+#include "PrintConfig.hpp"
+#include "TriangleMesh.hpp"
 #include "TriangleMeshSlicer.hpp"
+#include "libslic3r.h"
 
 #include <boost/log/trivial.hpp>
+#include <Eigen/Core>
+#include <Eigen/Geometry>
+#include <Eigen/LU>
 
 #include <algorithm>
+#include <cassert>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <map>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace Slic3r {
 
@@ -300,6 +319,17 @@ std::vector<CutSegmentDescriptor> derive_cut_segments(
         return std::vector<CutSegmentDescriptor>{};
     };
 
+    const double determinant = instance_transform.linear().determinant();
+    if (!instance_transform.matrix().allFinite() || !std::isfinite(determinant) ||
+        std::abs(determinant) < std::numeric_limits<double>::min() ||
+        !std::isfinite(min_segment_thickness) || min_segment_thickness < 0. ||
+        !root_build_normal_world.allFinite() || !std::isfinite(root_build_normal_world.norm()) ||
+        root_build_normal_world.norm() < EPSILON)
+        return fail(CutSegmentationStatus::InvalidGeometry);
+    for (const stl_vertex &vertex : merged.vertices)
+        if (!vertex.allFinite())
+            return fail(CutSegmentationStatus::InvalidGeometry);
+
     // Collect enabled planes with well-defined normals.
     std::vector<NormalizedPlane> planes;
     for (int i = 0; i < int(authored_planes.size()); ++ i) {
@@ -307,6 +337,10 @@ std::vector<CutSegmentDescriptor> derive_cut_segments(
         if (! cp.enabled)
             continue;
         const double len = cp.normal.norm();
+        if (!cp.point.allFinite() || !cp.normal.allFinite() || !std::isfinite(len) ||
+            (cp.has_build_normal && (!cp.build_normal.allFinite() || !std::isfinite(cp.build_normal.norm()) ||
+                                    cp.build_normal.norm() < EPSILON)))
+            return fail(CutSegmentationStatus::InvalidGeometry);
         if (len < EPSILON)
             continue;
         const Vec3d n = cp.normal / len;

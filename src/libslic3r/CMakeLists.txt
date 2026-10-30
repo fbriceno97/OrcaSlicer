@@ -119,6 +119,9 @@ set(lisbslic3r_sources
     CustomGCode.hpp
     CutUtils.cpp
     CutUtils.hpp
+    CutPlanes.hpp
+    CutPlaneSegmentation.cpp
+    CutPlaneSegmentation.hpp
     EdgeGrid.cpp
     EdgeGrid.hpp
     ElephantFootCompensation.cpp

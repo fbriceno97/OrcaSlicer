@@ -575,6 +575,12 @@ Transformation generate_transform(const Vec3d &x_dir, const Vec3d &y_dir, const 
  */
 bool is_point_inside_polygon_corner(const Point &a, const Point &b, const Point &c, const Point &query_point);
 
+// Slicing-frame orientation, in degrees: R = Ry(b) * Rz(c) maps the build
+// normal onto +Z. This does not imply that a printer has rotary axes.
+Eigen::Matrix3d layer_rotation_matrix(double b_deg, double c_deg);
+void bc_from_build_normal(const Vec3d &normal, double &b_deg, double &c_deg);
+Vec3d build_normal_from_bc(double b_deg, double c_deg);
+
 } } // namespace Slicer::Geometry
 
 #endif

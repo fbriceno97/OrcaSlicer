@@ -43,7 +43,8 @@ enum class CutSegmentationStatus
     TooManyPlanes,  // more than the supported maximum (64) of enabled planes
     NoSplit,        // no enabled plane actually splits the mesh (fewer than two occupied cells)
     NoRootCell,     // no cell is on the near side of every plane -- no bed-resting root
-    SegmentTooThin  // some segment would be thinner than min_segment_thickness
+    SegmentTooThin, // some segment would be thinner than min_segment_thickness
+    InvalidGeometry // nonfinite or degenerate input cannot define a partition
 };
 
 // Which side of a bounding plane the segment lies on, and therefore what the plane means to
