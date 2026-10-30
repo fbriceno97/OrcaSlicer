@@ -179,6 +179,8 @@ public:
     float height;
     double smooth_speed = 0;
     bool z_contoured = false;
+    // Wave-overhang path identity for downstream G-code and preview integration.
+    bool wave_overhang = false;
 
     ExtrusionPath() : mm3_per_mm(-1), width(-1), height(-1), m_role(erNone), m_no_extrusion(false) {}
     ExtrusionPath(ExtrusionRole role) : mm3_per_mm(-1), width(-1), height(-1), m_role(role), m_no_extrusion(false) {}
@@ -193,6 +195,7 @@ public:
         , height(rhs.height)
         , smooth_speed(rhs.smooth_speed)
         , z_contoured(rhs.z_contoured)
+        , wave_overhang(rhs.wave_overhang)
         , m_can_reverse(rhs.m_can_reverse)
         , m_role(rhs.m_role)
         , m_no_extrusion(rhs.m_no_extrusion)
@@ -206,6 +209,7 @@ public:
         , height(rhs.height)
         , smooth_speed(rhs.smooth_speed)
         , z_contoured(rhs.z_contoured)
+        , wave_overhang(rhs.wave_overhang)
         , m_can_reverse(rhs.m_can_reverse)
         , m_role(rhs.m_role)
         , m_no_extrusion(rhs.m_no_extrusion)
@@ -219,6 +223,7 @@ public:
         , height(rhs.height)
         , smooth_speed(rhs.smooth_speed)
         , z_contoured(rhs.z_contoured)
+        , wave_overhang(rhs.wave_overhang)
         , m_can_reverse(rhs.m_can_reverse)
         , m_role(rhs.m_role)
         , m_no_extrusion(rhs.m_no_extrusion)
@@ -232,6 +237,7 @@ public:
         , height(rhs.height)
         , smooth_speed(rhs.smooth_speed)
         , z_contoured(rhs.z_contoured)
+        , wave_overhang(rhs.wave_overhang)
         , m_can_reverse(rhs.m_can_reverse)
         , m_role(rhs.m_role)
         , m_no_extrusion(rhs.m_no_extrusion)
@@ -248,6 +254,7 @@ public:
         this->z_contoured = rhs.z_contoured;
         this->overhang_degree = rhs.overhang_degree;
         this->curve_degree = rhs.curve_degree;
+        this->wave_overhang = rhs.wave_overhang;
         this->polyline = rhs.polyline;
         return *this;
     }
@@ -262,6 +269,7 @@ public:
         this->z_contoured = rhs.z_contoured;
         this->overhang_degree = rhs.overhang_degree;
         this->curve_degree = rhs.curve_degree;
+        this->wave_overhang = rhs.wave_overhang;
         this->polyline = std::move(rhs.polyline);
         return *this;
     }
