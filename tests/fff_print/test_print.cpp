@@ -216,6 +216,50 @@ TEST_CASE("Section slices stay inside their model-space cut bounds", "[Print][Cu
     CHECK_THROWS_AS(print.process(), SlicingError);
 }
 
+TEST_CASE("Directed parts retain modifier bindings without slicing another section's material", "[Print][CutPlaneSegmentation]")
+{
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"layer_height", "0.2"},
+        {"initial_layer_print_height", "0.2"}});
+    Print print;
+    Model model;
+    init_print({cube(20.)}, print, model, config);
+    ModelObject *object = model.objects.front();
+    TriangleMesh part = cube(10.);
+    part.translate(30.f, 0.f, 0.f);
+    ModelVolume *directed = object->add_volume(std::move(part));
+    directed->config.set_key_value("layer_rotation_b", new ConfigOptionFloat(20.));
+    TriangleMesh hole = make_cube(5., 5., 22.);
+    hole.translate(5.f, 5.f, -1.f);
+    object->add_volume(std::move(hole))->set_type(ModelVolumeType::NEGATIVE_VOLUME);
+    print.apply(model, config);
+    REQUIRE(print.objects().size() == 2);
+    for (PrintObject *section : print.objects()) {
+        REQUIRE(section->segment().has_value());
+        section->slice();
+        REQUIRE_FALSE(section->layers().empty());
+        const bool owns_directed_part = section->segment()->part_volume == directed->id();
+        const double min_x = owns_directed_part ? 30. : 0.;
+        const double max_x = owns_directed_part ? 40. : 20.;
+        const Transform3d to_model = section->trafo_sliced().inverse();
+        size_t checked_vertices = 0;
+        bool has_hole = false;
+        for (const Layer *layer : section->layers())
+            for (const LayerRegion *region : layer->regions())
+                for (const Surface &surface : region->slices.surfaces) {
+                    has_hole = has_hole || !surface.expolygon.holes.empty();
+                    for (const Point &point : surface.expolygon.contour.points) {
+                        const Vec3d local = to_model * Vec3d(unscale<double>(point.x()), unscale<double>(point.y()), layer->slice_z);
+                        CHECK(local.x() >= min_x - 0.01);
+                        CHECK(local.x() <= max_x + 0.01);
+                        ++checked_vertices;
+                    }
+                }
+        CHECK(checked_vertices > 0);
+        CHECK(has_hole == !owns_directed_part);
+    }
+}
+
 TEST_CASE("Timelapse g-code is emitted once per layer for Bambu and non-Bambu printers", "[Print][Regression]")
 {
     struct PrinterCase {
