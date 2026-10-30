@@ -284,7 +284,7 @@ TEST_CASE("Whole-object directions slice above the physical bed without mutating
     model.objects.front()->config.set_key_value("layer_rotation_c", new ConfigOptionFloat(30.));
     print.apply(model, config);
     REQUIRE(print.objects().size() == 1);
-    PrintObject *section = print.objects().front();
+    PrintObject *section = print.get_object(0);
     REQUIRE(section->segment().has_value());
     section->slice();
     REQUIRE_FALSE(section->layers().empty());
