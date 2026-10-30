@@ -1,6 +1,7 @@
 #include "TrunnionAC.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
@@ -13,6 +14,9 @@
 #include <ostream>
 #include <sstream>
 #include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
 #include <unordered_map>
 #include <unordered_set>
 

@@ -34,6 +34,7 @@
 #include <boost/filesystem/path.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <cmath>
 #include <exception>
 #include <deque>
