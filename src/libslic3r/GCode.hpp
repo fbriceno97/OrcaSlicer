@@ -445,7 +445,7 @@ protected:
     // represent a G2/G3 arc. Belt printers get this through BeltKinematics
     // rather than through an override of their own.
     virtual bool should_disable_arc_fitting() const
-        { return ! m_writer.kinematics().supports_arc_moves(); }
+        { return ! m_writer.supports_arc_moves(); }
 
     void            _do_export(Print &print, GCodeOutputStream &file, ThumbnailsGeneratorCallback thumbnail_cb);
 

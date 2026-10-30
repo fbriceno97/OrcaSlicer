@@ -19,6 +19,7 @@
 #include "Config.hpp"
 #include "GCode/MachineKinematics.hpp"
 #include <memory>
+#include <optional>
 
 namespace Slic3r {
 
@@ -168,6 +169,10 @@ public:
     // configured is carried over, so install order does not matter.
     void set_kinematics(std::unique_ptr<MachineKinematics> kinematics);
     const MachineKinematics& kinematics() const { return *m_kinematics; }
+    // Generated motion only. The rigid map excludes physical plate/nozzle/Z
+    // calibration, which remains in machine coordinates after the rotation.
+    void set_section_transform(const std::optional<Transform3d> &transform);
+    bool supports_arc_moves() const { return !m_section_transform && m_kinematics->supports_arc_moves(); }
 
     // Per-point first-layer test.  When set, travel speed selection asks it per
     // destination point (in the writer's logical placed frame) instead of using
@@ -223,6 +228,11 @@ protected:
     // Never null: a CartesianKinematics at the identity remap reproduces the
     // historical behaviour exactly.
     std::unique_ptr<MachineKinematics> m_kinematics;
+    std::optional<Transform3d> m_section_transform;
+    std::vector<Vec2d> m_section_tool_offsets;
+    double m_section_z_offset {0.};
+    Vec3d section_physical_offset() const;
+    Vec3d map_section_point(const Vec3d &point) const;
 
     // Last configured remap / build volume, replayed onto a newly installed
     // kinematics so set_kinematics() and the setters are order-independent.

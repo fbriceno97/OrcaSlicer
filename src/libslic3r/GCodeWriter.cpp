@@ -30,6 +30,10 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <Eigen/Geometry>
+#include <Eigen/LU>
+#include <Eigen/Core>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <math.h>
@@ -52,7 +56,7 @@ bool GCodeWriter::full_gcode_comment = true;
 // lift has to be skipped rather than commanded.
 bool GCodeWriter::must_skip_lift_now() const
 {
-    return m_kinematics->suppress_lift_at_unknown_position() && ! this->is_current_position_clear();
+    return (m_section_transform.has_value() || m_kinematics->suppress_lift_at_unknown_position()) && ! this->is_current_position_clear();
 }
 
 bool GCodeWriter::point_on_first_layer(const Vec3d &point_logical) const
@@ -89,12 +93,54 @@ void GCodeWriter::set_kinematics(std::unique_ptr<MachineKinematics> kinematics)
 // Kept as the writer-facing name for "this move must emit every axis word".
 bool GCodeWriter::has_axis_remap() const
 {
-    return m_kinematics->must_emit_all_axes();
+    return m_section_transform.has_value() || m_kinematics->must_emit_all_axes();
 }
 
 Vec3d GCodeWriter::apply_axis_remap(const Vec3d &pos) const
 {
-    return m_kinematics->to_machine(pos);
+    return m_kinematics->to_machine(map_section_point(pos));
+}
+
+Vec3d GCodeWriter::section_physical_offset() const
+{
+    const size_t nozzle = filament() ? filament()->extruder_id() : 0;
+    const Vec2d offset = m_section_tool_offsets.empty() ? Vec2d(Vec2d::Zero())
+        : m_section_tool_offsets[std::min(nozzle, m_section_tool_offsets.size() - 1)];
+    return Vec3d(-offset.x() - m_x_offset, -offset.y() - m_y_offset, m_section_z_offset);
+}
+
+Vec3d GCodeWriter::map_section_point(const Vec3d &point) const
+{
+    if (!m_section_transform)
+        return point;
+    const Vec3d offset = section_physical_offset();
+    return *m_section_transform * (point - offset) + offset;
+}
+
+void GCodeWriter::set_section_transform(const std::optional<Transform3d> &transform)
+{
+    if (transform) {
+        const Matrix3d rotation = transform->linear();
+        if (!transform->matrix().allFinite() || !std::isfinite(rotation.determinant()) ||
+            std::abs(rotation.determinant() - 1.) > 1e-8 ||
+            !(rotation.transpose() * rotation).isApprox(Matrix3d::Identity(), 1e-8) ||
+            !transform->matrix().row(3).isApprox(Eigen::RowVector4d(0., 0., 0., 1.), 1e-8))
+            throw std::invalid_argument("Section emission requires a finite rigid transform");
+    }
+    if ((!transform && !m_section_transform) ||
+        (transform && m_section_transform && transform->matrix().isApprox(m_section_transform->matrix(), 1e-12)))
+        return;
+    // Switching frames must not teleport the writer's physical position. Pending
+    // logical lifts belong to the old frame and cannot carry into the new one.
+    const Vec3d plate(m_x_offset, m_y_offset, 0.);
+    const Vec3d physical = map_section_point(m_pos - plate);
+    m_section_transform = transform;
+    if (transform) {
+        const Vec3d offset = section_physical_offset();
+        m_pos = transform->inverse() * (physical - offset) + offset + plate;
+    } else
+        m_pos = physical + plate;
+    m_lifted = m_to_lift = 0.;
 }
 
 bool GCodeWriter::supports_separate_travel_acceleration(GCodeFlavor flavor)
@@ -105,6 +151,8 @@ bool GCodeWriter::supports_separate_travel_acceleration(GCodeFlavor flavor)
 void GCodeWriter::apply_print_config(const PrintConfig &print_config)
 {
     this->config.apply(print_config, true);
+    m_section_tool_offsets = print_config.extruder_offset.values;
+    m_section_z_offset = print_config.z_offset.value;
 
     // Some machine limits are stride-2 (normal, silent) pairs, here we extract the value that will be used,
     // which is always normal mode at the moment
@@ -895,7 +943,7 @@ it will not perform subsequent lifts, even if Z was raised manually
 (i.e. with travel_to_z()) and thus _lifted was reduced. */
 std::string GCodeWriter::lazy_lift(LiftType lift_type, bool spiral_vase)
 {
-    if (m_force_normal_lift)
+    if (m_force_normal_lift || m_section_transform)
         lift_type = LiftType::NormalLift;
     // check whether the above/below conditions are met
     double target_lift = 0;
@@ -929,7 +977,7 @@ std::string GCodeWriter::lazy_lift(LiftType lift_type, bool spiral_vase)
 // BBS: immediately execute an undelayed lift move with a spiral lift pattern
 // designed specifically for subsequent gcode injection (e.g. timelapse)
 std::string GCodeWriter::eager_lift(const LiftType type) {
-    const LiftType effective_type = m_force_normal_lift ? LiftType::NormalLift : type;
+    const LiftType effective_type = (m_force_normal_lift || m_section_transform) ? LiftType::NormalLift : type;
     std::string lift_move;
     double target_lift = 0;
     {
@@ -1368,7 +1416,7 @@ void GCodeWriter::extrude_arc_to_xy(std::string &out, const Vec2d& point, const 
     // its diameter and a full circle a stationary blob -- so approximate the arc
     // with linear segments bounded by a chord tolerance, splitting dE between
     // them in proportion to arc length.
-    if (! m_kinematics->supports_arc_moves()) {
+    if (!supports_arc_moves()) {
         this->extrude_arc_as_polyline(out, point, center_offset, dE, is_ccw, comment, force_no_extrusion);
         return;
     }

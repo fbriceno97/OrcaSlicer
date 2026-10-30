@@ -46,9 +46,79 @@
 #include "libslic3r/GCodeReader.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Arrange.hpp"
+#include <Eigen/Geometry>
+#include <optional>
+#include <stdexcept>
+#include <cstddef>
 
 using namespace Slic3r;
 using namespace Slic3r::Test;
+
+TEST_CASE("Section motion leaves physical calibration outside the build-frame rotation", "[GCodeWriter][Nonplanar]")
+{
+    PrintConfig config;
+    config.extruder_offset.values = {Vec2d(3., 5.)};
+    config.z_offset.value = 0.2;
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_xy_offset(100., 200.);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    Transform3d frame = Transform3d::Identity();
+    frame.rotate(Eigen::AngleAxisd(Geometry::deg2rad(30.), Vec3d::UnitY()));
+    frame.translation() = Vec3d(15., 120., 200.);
+    writer.set_section_transform(frame);
+    const Vec3d geometry(110., 220., 50.);
+    const Vec3d expected = frame * geometry + Vec3d(-103., -205., 0.2);
+    const std::string output = writer.travel_to_xyz(geometry + Vec3d(-3., -5., 0.2));
+    GCodeReader reader;
+    Vec3d emitted = Vec3d::Zero();
+    reader.parse_buffer(output, [&](GCodeReader &state, const GCodeReader::GCodeLine &line) {
+        if (line.cmd_is("G1"))
+            emitted = Vec3d(line.new_X(state), line.new_Y(state), line.new_Z(state));
+    });
+    CHECK_THAT((emitted - expected).norm(), Catch::Matchers::WithinAbs(0., 0.002));
+    writer.set_section_transform(std::nullopt);
+    CHECK_THAT((writer.get_position() - Vec3d(100., 200., 0.) - expected).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+}
+
+TEST_CASE("Tilted arcs emit linear XYZ moves without changing their extrusion amount", "[GCodeWriter][Nonplanar]")
+{
+    PrintConfig config;
+    config.use_relative_e_distances.value = false;
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    Transform3d frame = Transform3d::Identity();
+    frame.rotate(Eigen::AngleAxisd(Geometry::deg2rad(30.), Vec3d::UnitY()));
+    writer.set_section_transform(frame);
+    writer.set_position(Vec3d(1., 0., 1.));
+    const std::string output = writer.extrude_arc_to_xy(Vec2d(-1., 0.), Vec2d(-1., 0.), 2., true);
+    GCodeReader reader;
+    size_t moves = 0;
+    Vec3d emitted = Vec3d::Zero();
+    double extrusion = 0.;
+    reader.parse_buffer(output, [&](GCodeReader &state, const GCodeReader::GCodeLine &line) {
+        CHECK_FALSE(line.cmd_is("G2"));
+        CHECK_FALSE(line.cmd_is("G3"));
+        if (line.cmd_is("G1")) {
+            ++moves;
+            emitted = Vec3d(line.new_X(state), line.new_Y(state), line.new_Z(state));
+            extrusion = line.new_E(state);
+        }
+    });
+    CHECK(moves > 2);
+    CHECK_THAT((emitted - frame * Vec3d(-1., 0., 1.)).norm(), Catch::Matchers::WithinAbs(0., 0.002));
+    CHECK_THAT(extrusion, Catch::Matchers::WithinAbs(2., 1e-5));
+
+    Transform3d invalid = Transform3d::Identity();
+    invalid.scale(2.);
+    CHECK_THROWS_AS(writer.set_section_transform(invalid), std::invalid_argument);
+    invalid = Transform3d::Identity();
+    invalid.matrix()(3, 3) = 0.;
+    CHECK_THROWS_AS(writer.set_section_transform(invalid), std::invalid_argument);
+}
 
 TEST_CASE("Belt machine coordinates retain a non-45-degree slicing angle", "[GCodeWriter][belt]")
 {
