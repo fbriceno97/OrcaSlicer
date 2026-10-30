@@ -17,6 +17,37 @@
 
 using namespace Slic3r;
 
+TEST_CASE("Moving a seam preserves wave identity on both halves of a split path", "[ExtrusionEntity][WaveOverhangs]")
+{
+    ExtrusionPath wave{erOverhangPerimeter, 1., 0.45f, 0.2f};
+    wave.polyline.append(Point3::new_scale(0., 0., 0.));
+    wave.polyline.append(Point3::new_scale(20., 0., 0.));
+    wave.polyline.append(Point3::new_scale(20., 20., 0.));
+    wave.wave_overhang = true;
+    wave.z_contoured = true;
+    ExtrusionPath ordinary{erExternalPerimeter, 1., 0.45f, 0.2f};
+    ordinary.polyline.append(Point3::new_scale(20., 20., 0.));
+    ordinary.polyline.append(Point3::new_scale(0., 20., 0.));
+    ordinary.polyline.append(Point3::new_scale(0., 0., 0.));
+    ExtrusionLoop loop(ExtrusionPaths{wave, ordinary});
+    loop.split_at(Point::new_scale(10., 0.), false, 0.);
+    unsigned wave_paths = 0;
+    unsigned ordinary_paths = 0;
+    for (const ExtrusionPath &path : loop.paths) {
+        if (path.role() == erOverhangPerimeter) {
+            CHECK(path.wave_overhang);
+            CHECK(path.z_contoured);
+            ++wave_paths;
+        } else {
+            CHECK_FALSE(path.wave_overhang);
+            ++ordinary_paths;
+        }
+    }
+    CHECK(wave_paths == 2);
+    CHECK(ordinary_paths == 1);
+    CHECK_THAT(unscale<double>(loop.length()), Catch::Matchers::WithinAbs(80., 1e-9));
+}
+
 static inline Slic3r::Point3 random_point3(float LO=-50, float HI=50)
 {
     Vec3f pt = Vec3f(LO, LO, LO) + (Vec3d(rand(), rand(), rand()) * (HI-LO) / RAND_MAX).cast<float>();

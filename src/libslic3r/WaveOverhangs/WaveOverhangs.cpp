@@ -132,7 +132,7 @@ Points detect_overhang_corners(const Polygons &polys, double angle_threshold_rad
             // negative turn is convex-outward-from-the-solid-material.
             const bool convex = is_ccw ? turn > 0. : turn < 0.;
             if (! convex) continue;
-            const double interior_angle_rad = M_PI - std::abs(turn);
+            const double interior_angle_rad = PI - std::abs(turn);
             if (interior_angle_rad < angle_threshold_rad)
                 corners.emplace_back(B);
         }
@@ -155,7 +155,7 @@ Polygons build_corner_influence(const Points &corners, coord_t radius_scaled)
         Polygon disk;
         disk.points.reserve(disk_sides);
         for (int k = 0; k < disk_sides; ++k) {
-            const double a = 2.0 * M_PI * double(k) / double(disk_sides);
+            const double a = 2.0 * PI * double(k) / double(disk_sides);
             disk.points.emplace_back(
                 c.x() + coord_t(std::cos(a) * double(radius_scaled)),
                 c.y() + coord_t(std::sin(a) * double(radius_scaled)));
@@ -747,7 +747,7 @@ std::tuple<std::vector<ExtrusionPaths>, Polygons> generate(
     const int     taper_substeps     = taper_enabled
                                        ? std::min(8, std::max(2, int(std::round(double(wave_spacing) / double(wave_spacing_corner)))))
                                        : 1;
-    const double  corner_angle_rad   = std::max(10.0, std::min(179.0, corner_angle_threshold_deg)) * M_PI / 180.0;
+    const double  corner_angle_rad   = std::max(10.0, std::min(179.0, corner_angle_threshold_deg)) * PI / 180.0;
     const coord_t anchors_size       = std::min(coord_t(scale_(EXTERNAL_INFILL_MARGIN)), base_spacing * (perimeter_count + 1));
     const coord_t seed_expansion     = std::max<coord_t>(1, base_spacing / 10);
     const coord_t shell_inner_edge   = additional_shell_count > 0 ? overhang_flow.scaled_width() + (additional_shell_count - 1) * base_spacing : 0;
