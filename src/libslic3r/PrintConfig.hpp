@@ -119,6 +119,9 @@ enum PrintHostType {
     htPrusaLink, htPrusaConnect, htOctoPrint, htDuet, htUltiMaker, htFlashAir, htAstroBox, htRepetier, htMKS, htESP3D, htCrealityPrint, htObico, htFlashforge, htSimplyPrint, htElegooLink, ht3DPrinterOS, htMoonraker
 };
 
+// Unlayered wave-overhang generator patterns (ported under AGPL-3.0-or-later).
+enum class WaveOverhangPattern : int { Monotonic, ZigZag, Smart };
+
 enum AuthorizationType {
     atKeyPassword, atUserPassword
 };
@@ -1580,6 +1583,9 @@ PRINT_CONFIG_CLASS_DEFINE(
     // Orca
     ((ConfigOptionBool,                 make_overhang_printable))
     ((ConfigOptionBool,                 extra_perimeters_on_overhangs))
+    // Experimental wave-overhangs: OFF by default; three-axis Windows prototype.
+    ((ConfigOptionBool,                 wave_overhangs))
+    ((ConfigOptionFloat,                wave_overhang_line_spacing))
     ((ConfigOptionBoolsNullable,        slowdown_for_curled_perimeters))
     ((ConfigOptionBool,                 hole_to_polyhole))
     ((ConfigOptionFloatOrPercent,       hole_to_polyhole_threshold))
