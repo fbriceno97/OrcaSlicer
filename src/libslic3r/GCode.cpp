@@ -1416,9 +1416,9 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
                 // BBS: check whether custom gcode changes the z position. Update if changed
                 double temp_z_after_tool_change;
                 if (GCodeProcessor::get_last_z_from_gcode(toolchange_gcode_str, temp_z_after_tool_change)) {
-                    Vec3d pos = gcodegen.writer().get_position();
+                    Vec3d pos = gcodegen.writer().position_for_custom_gcode();
                     pos(2)    = temp_z_after_tool_change;
-                    gcodegen.writer().set_position(pos);
+                    gcodegen.update_position_from_custom_gcode(pos);
                 }
             }
             need_travel_after_change_filament_gcode = true;
@@ -2139,9 +2139,21 @@ void GCode::PlaceholderParserIntegration::init(const GCodeWriter &writer)
     this->parser.set("zhop", this->opt_zhop);
 }
 
+void GCode::update_position_from_custom_gcode(const Vec3d &position)
+{
+    m_writer.set_position_from_custom_gcode(position);
+    if (m_writer.has_section_transform()) {
+        const Vec3d logical = m_writer.get_position();
+        const Point xy = gcode_to_point(Vec2d(logical.x(), logical.y()));
+        set_last_pos(Point3(xy, scale_(logical.z() - m_config.z_offset.value)));
+        m_wipe.reset_path();
+    }
+}
+
 void GCode::PlaceholderParserIntegration::update_from_gcodewriter(const GCodeWriter &writer)
 {
-    memcpy(this->position.data(), writer.get_position().data(), sizeof(double) * 3);
+    const Vec3d machine_position = writer.position_for_custom_gcode();
+    memcpy(this->position.data(), machine_position.data(), sizeof(double) * 3);
     this->opt_position->values = this->position;
     this->opt_zhop->value = writer.get_zhop();
 
@@ -5292,8 +5304,9 @@ PlaceholderParserIntegration &ppi = m_placeholder_parser_integration;
 
         if (const std::vector<double> &pos = ppi.opt_position->values; ppi.position != pos) {
             // Update G-code writer.
-            m_writer.set_position({ pos[0], pos[1], pos[2] });
-            this->set_last_pos(this->gcode_to_point({ pos[0], pos[1] }));
+            update_position_from_custom_gcode(Vec3d(pos[0], pos[1], pos[2]));
+            if (!m_writer.has_section_transform())
+                this->set_last_pos(this->gcode_to_point({ pos[0], pos[1] }));
         }
 
         for (const Extruder &e : m_writer.extruders()) {
@@ -6388,9 +6401,9 @@ std::string GCode::generate_timelapse_gcode(const Print &print, coordf_t print_z
 
         double temp_z_after_tool_change;
         if (GCodeProcessor::get_last_z_from_gcode(timelapse_gcode, temp_z_after_tool_change)) {
-            Vec3d pos = m_writer.get_position();
+            Vec3d pos = m_writer.position_for_custom_gcode();
             pos(2)    = temp_z_after_tool_change;
-            m_writer.set_position(pos);
+            update_position_from_custom_gcode(pos);
         }
     }
 
@@ -7331,9 +7344,9 @@ LayerResult GCode::process_layer(
 
         double temp_z_after_tool_change;
         if (GCodeProcessor::get_last_z_from_gcode(wrapping_gcode, temp_z_after_tool_change)) {
-            Vec3d pos = m_writer.get_position();
+            Vec3d pos = m_writer.position_for_custom_gcode();
             pos(2)    = temp_z_after_tool_change;
-            m_writer.set_position(pos);
+            update_position_from_custom_gcode(pos);
         }
         return wrapping_gcode;
     };
@@ -11017,9 +11030,9 @@ std::string GCode::set_extruder(unsigned int new_filament_id, double print_z, bo
             //BBS: check whether custom gcode changes the z position. Update if changed
             double temp_z_after_tool_change;
             if (GCodeProcessor::get_last_z_from_gcode(toolchange_gcode_parsed, temp_z_after_tool_change)) {
-                Vec3d pos = m_writer.get_position();
+                Vec3d pos = m_writer.position_for_custom_gcode();
                 pos(2) = temp_z_after_tool_change;
-                m_writer.set_position(pos);
+                update_position_from_custom_gcode(pos);
             }
         }
     }

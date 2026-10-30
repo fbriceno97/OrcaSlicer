@@ -176,6 +176,7 @@ public:
     // Generated motion only. The rigid map excludes physical plate/nozzle/Z
     // calibration, which remains in machine coordinates after the rotation.
     void set_section_transform(const std::optional<Transform3d> &transform);
+    bool has_section_transform() const { return m_section_transform.has_value(); }
     bool supports_arc_moves() const { return !m_section_transform && m_kinematics->supports_arc_moves(); }
 
     // Per-point first-layer test.  When set, travel speed selection asks it per

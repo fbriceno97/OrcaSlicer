@@ -124,6 +124,40 @@ TEST_CASE("Tilted arcs emit linear XYZ moves without changing their extrusion am
     CHECK_THROWS_AS(writer.set_section_transform(invalid), std::invalid_argument);
 }
 
+TEST_CASE("Custom templates exchange machine positions while generated motion stays in a section frame", "[GCodeWriter][Nonplanar]")
+{
+    struct TemplateGCode : GCode {
+        void initialize()
+        {
+            PrintConfig config;
+            config.use_relative_e_distances.value = false;
+            m_config.apply(config, true);
+            m_writer.apply_print_config(config);
+            m_writer.set_extruders({0});
+            m_writer.set_extruder(0);
+            m_placeholder_parser_integration.init(m_writer);
+        }
+    } generator;
+    generator.initialize();
+    Transform3d frame = Transform3d::Identity();
+    frame.rotate(Eigen::AngleAxisd(Geometry::deg2rad(30.), Vec3d::UnitY()));
+    frame.translation() = Vec3d(5., 7., 10.);
+    generator.writer().set_section_transform(frame);
+    generator.writer().set_position_from_custom_gcode(Vec3d(12., 15., 20.));
+    const std::string output = generator.placeholder_parser_process("machine_end_gcode",
+        "G1 X{position[0]} Y{position[1]} Z{position[2]}\n{position[0] = 16}{position[2] = 25}", 0);
+    CHECK(output.find("!!!!!") == std::string::npos);
+    GCodeReader reader;
+    Vec3d command = Vec3d::Zero();
+    reader.parse_buffer(output, [&](GCodeReader &state, const GCodeReader::GCodeLine &line) {
+        if (line.cmd_is("G1"))
+            command = Vec3d(line.new_X(state), line.new_Y(state), line.new_Z(state));
+    });
+    CHECK_THAT((command - Vec3d(12., 15., 20.)).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    CHECK_THAT((generator.writer().position_for_custom_gcode() - Vec3d(16., 15., 25.)).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    CHECK_THAT((generator.writer().get_position() - frame.inverse() * Vec3d(16., 15., 25.)).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+}
+
 TEST_CASE("Belt machine coordinates retain a non-45-degree slicing angle", "[GCodeWriter][belt]")
 {
     PrintConfig config;
