@@ -201,7 +201,7 @@ private:
     void render_object_build_direction();
     // Segments only print correctly under the By-group sequence; offer to switch when the user
     // authors the first thing that needs it. `message` names that thing.
-    void offer_by_group_sequence(const wxString &message);
+    void offer_by_object_sequence(const wxString &message);
 
     int m_active_plane { -1 };
 

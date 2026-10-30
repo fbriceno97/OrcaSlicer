@@ -790,14 +790,14 @@ void GLGizmoCutPlanes::set_active_plane(int idx)
     m_parent.request_extra_frame();
 }
 
-void GLGizmoCutPlanes::offer_by_group_sequence(const wxString &message)
+void GLGizmoCutPlanes::offer_by_object_sequence(const wxString &message)
 {
-    if (wxGetApp().global_print_sequence() == PrintSequence::ByGroup)
+    if (wxGetApp().global_print_sequence() == PrintSequence::ByObject)
         return;
     MessageDialog dialog(wxGetApp().plater(), message, _L("Change print sequence"), wxICON_QUESTION | wxYES_NO | wxYES_DEFAULT);
     if (dialog.ShowModal() == wxID_YES) {
         DynamicPrintConfig config = wxGetApp().preset_bundle->prints.get_edited_preset().config;
-        config.set_key_value("print_sequence", new ConfigOptionEnum<PrintSequence>(PrintSequence::ByGroup));
+        config.set_key_value("print_sequence", new ConfigOptionEnum<PrintSequence>(PrintSequence::ByObject));
         wxGetApp().get_tab(Preset::TYPE_PRINT)->load_config(config);
     }
 }
@@ -825,7 +825,7 @@ void GLGizmoCutPlanes::add_plane()
         mo->cut_planes.enabled = true; // authoring the first plane implies the user wants the feature on
 
     if (first_plane)
-        offer_by_group_sequence(_L("Cut-plane printing requires the \"By group\" print sequence. Change the current process setting to \"By group\" now?"));
+        offer_by_object_sequence(_L("Cut-plane printing requires the \"By object\" print sequence. Change the current process setting to \"By object\" now?"));
 
     m_contours_dirty = true;
     m_preview_valid = false;
@@ -1580,7 +1580,7 @@ void GLGizmoCutPlanes::render_object_build_direction()
         m_merged_dirty  = true;  // the undirected set changed; contours and preview follow the mesh
         m_preview_valid = false;
         if (first_directed_part)
-            offer_by_group_sequence(_L("Per-part build directions require the \"By group\" print sequence. Change the current process setting to \"By group\" now?"));
+            offer_by_object_sequence(_L("Per-part build directions require the \"By object\" print sequence. Change the current process setting to \"By object\" now?"));
         schedule_background_process();
     }
     if (ImGui::IsItemHovered())
