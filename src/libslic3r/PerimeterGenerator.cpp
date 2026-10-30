@@ -13,6 +13,7 @@
 #include "Point.hpp"
 #include "Flow.hpp"
 #include "PrintConfig.hpp"
+#include "WaveOverhangs/AndersonsGenerator.hpp"
 #include "ShortestPath.hpp"
 #include "Surface.hpp"
 #include "VariableWidth.hpp"
@@ -1329,13 +1330,34 @@ std::tuple<std::vector<ExtrusionPaths>, Polygons> generate_extra_perimeters_over
 
 void PerimeterGenerator::apply_extra_perimeters(ExPolygons &infill_area)
 {
-    if (!m_spiral_vase && this->lower_slices != nullptr && this->config->detect_overhang_wall && this->config->extra_perimeters_on_overhangs &&
+    const bool use_waves = this->config->wave_overhangs.value;
+    if (!m_spiral_vase && this->lower_slices != nullptr && this->config->detect_overhang_wall && (this->config->extra_perimeters_on_overhangs || use_waves) &&
         this->config->wall_loops > 0 && this->layer_id > this->object_config->raft_layers) {
         // Generate extra perimeters on overhang areas, and cut them to these parts only, to save print time and material
-        auto [extra_perimeters, filled_area] = generate_extra_perimeters_over_overhangs(infill_area, this->lower_slices_polygons(),
-                                                                                        this->config->wall_loops, this->overhang_flow,
-                                                                                        this->m_scaled_resolution, *this->object_config,
-                                                                                        *this->print_config);
+        // Replace normal extra-overhang perimeters with wave traces only when explicitly enabled.
+        // The input is the already-exposed infill polygon, so the normal wall envelope is
+        // preserved and generated wave coverage is carved from the ordinary infill below.
+        auto [extra_perimeters, filled_area] = [&]() -> std::tuple<std::vector<ExtrusionPaths>, Polygons> {
+            if (!use_waves)
+                return generate_extra_perimeters_over_overhangs(infill_area, this->lower_slices_polygons(),
+                                                                 this->config->wall_loops, this->overhang_flow,
+                                                                 this->m_scaled_resolution, *this->object_config,
+                                                                 *this->print_config);
+            WaveOverhangs::CommonParams params;
+            params.perimeter_count = std::max(1, this->config->wall_loops.value);
+            params.additional_shell_count = 0;
+            params.line_spacing = this->config->wave_overhang_line_spacing.value;
+            params.line_width = this->overhang_flow.nozzle_diameter();
+            params.overhang_flow = this->overhang_flow;
+            params.scaled_resolution = this->m_scaled_resolution;
+            params.pattern = WaveOverhangPattern::Smart;
+            params.max_iterations = 64;  // Bounded experimental algorithm: never unlimited.
+            params.min_new_area = 0.01;
+            params.use_instead_of_bridges = false;
+            WaveOverhangs::AndersonsGenerator generator;
+            auto result = generator.generate(infill_area, this->lower_slices_polygons(), params);
+            return {std::move(result.paths), std::move(result.residual)};
+        }();
         if (!extra_perimeters.empty()) {
             ExtrusionEntityCollection *this_islands_perimeters = static_cast<ExtrusionEntityCollection *>(this->loops->entities.back());
             ExtrusionEntityCollection  new_perimeters{};
