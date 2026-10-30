@@ -9027,6 +9027,10 @@ static bool overhang_fan_active(float overlap, int overhang_fan_threshold, Extru
 std::string GCode::_extrude(const ExtrusionPath &path, const std::string &path_description, double speed)
 {
     std::string gcode;
+    // Keep wave paths identifiable in exported files without changing the existing
+    // overhang role consumed by preview, cooling, and pressure advance.
+    if (path.wave_overhang)
+        gcode += "; WAVE_OVERHANG_BEGIN\n";
 
     const std::string  bridge_description = is_bridge(path.role()) ? path_description + " (bridge)" : std::string();
     const std::string &description        = bridge_description.empty() ? path_description : bridge_description;
@@ -9382,6 +9386,11 @@ std::string GCode::_extrude(const ExtrusionPath &path, const std::string &path_d
     }
 }
     
+    // Wavefronts need an explicit cap even when bridge/overhang speed control is
+    // disabled. Only reduce the already limited speed; never undo a filament cap.
+    if (path.wave_overhang)
+        speed = std::min(speed, m_config.wave_overhang_speed.value);
+
     bool requires_segmented_extrusion = false;
     // A uniform fan state can be represented by the normal path-wide marker. Only a
     // transition within the path requires point-by-point emission.
@@ -9474,6 +9483,12 @@ std::string GCode::_extrude(const ExtrusionPath &path, const std::string &path_d
                     }) != new_points.end();
             }
     }
+
+    // Dynamic overhang estimation may assign individual speeds from the wall
+    // reference speed, independently of the path-wide speed above.
+    if (path.wave_overhang)
+        for (ProcessedPoint &point : new_points)
+            point.speed = std::min(point.speed, float(speed));
 
     double F = speed * 60;  // convert mm/sec to mm/min
     
@@ -10024,6 +10039,8 @@ std::string GCode::_extrude(const ExtrusionPath &path, const std::string &path_d
     }
 
     this->set_last_pos(path.last_point());
+    if (path.wave_overhang)
+        gcode += "; WAVE_OVERHANG_END\n";
     return gcode;
 }
 

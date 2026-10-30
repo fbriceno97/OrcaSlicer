@@ -1856,6 +1856,16 @@ void PrintConfigDef::init_fff_params()
     def->max = 2.0;
     def->set_default_value(new ConfigOptionFloat(0.35));
 
+    def = this->add("wave_overhang_speed", coFloat);
+    def->label = L("Wave overhang speed");
+    def->category = L("Speed");
+    def->tooltip = L("Maximum extrusion speed for experimental wave-overhang traces. Slower filament, cooling, and overhang limits still apply. This setting does not establish printer clearance or printing safety.");
+    def->sidetext = L("mm/s");
+    def->mode = comExpert;
+    def->min = 0.1;
+    def->max = 100.0;
+    def->set_default_value(new ConfigOptionFloat(10.0));
+
     def = this->add("overhang_reverse", coBool);
     def->label = L("Reverse on even");
     def->full_label = L("Overhang reversal");

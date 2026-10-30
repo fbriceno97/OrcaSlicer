@@ -2,8 +2,12 @@
 // Intentionally excludes Unlayered's unported floor, temperature, and nonplanar options.
 // AGPL-3.0-or-later attribution is preserved in WaveOverhangs source files.
 #include <catch2/catch_all.hpp>
+#include <algorithm>
+#include <cmath>
+#include <string>
 #include "libslic3r/ExtrusionEntity.hpp"
 #include "libslic3r/ExtrusionEntityCollection.hpp"
+#include "libslic3r/GCodeReader.hpp"
 #include "libslic3r/Layer.hpp"
 #include "libslic3r/Print.hpp"
 #include "libslic3r/TriangleMesh.hpp"
@@ -82,4 +86,55 @@ TEST_CASE("Enabled wave-overhangs generate flagged toolpaths for unsupported she
     Print wave;
     Test::init_and_process_print({unsupported_shelf()}, wave, settings(true));
     CHECK(count_waves(wave) > 0);
+}
+
+TEST_CASE("Exported wave moves respect their speed cap with dynamic overhang control on or off", "[WaveOverhangs][Windows]")
+{
+    const bool dynamic_overhang_speed = GENERATE(false, true);
+    const double bridge_speed = GENERATE(3.0, 80.0);
+    const double wave_speed = 7.5;
+    DynamicPrintConfig config = settings(true);
+    config.set_deserialize_strict({
+        {"wave_overhang_speed", std::to_string(wave_speed)},
+        {"enable_overhang_speed", dynamic_overhang_speed ? "1" : "0"},
+        {"bridge_speed", std::to_string(bridge_speed)},
+        {"inner_wall_speed", "100"},
+        {"outer_wall_speed", "100"},
+        {"enable_arc_fitting", "0"},
+    });
+    const std::string gcode = Test::slice({unsupported_shelf()}, config);
+    GCodeReader reader;
+    reader.apply_config(config);
+    bool in_wave = false;
+    size_t wave_moves = 0;
+    size_t wave_paths = 0;
+    reader.parse_buffer(gcode, [&](GCodeReader &state, const GCodeReader::GCodeLine &line) {
+        if (line.raw() == "; WAVE_OVERHANG_BEGIN") {
+            REQUIRE_FALSE(in_wave);
+            in_wave = true;
+            ++wave_paths;
+        } else if (line.raw() == "; WAVE_OVERHANG_END") {
+            REQUIRE(in_wave);
+            in_wave = false;
+        } else if (in_wave && line.extruding(state) && line.dist_XY(state) > 0) {
+            ++wave_moves;
+            CHECK(std::isfinite(line.new_X(state)));
+            CHECK(std::isfinite(line.new_Y(state)));
+            CHECK(std::isfinite(line.new_Z(state)));
+            CHECK(line.new_F(state) > 0);
+            CHECK(line.new_F(state) <= std::min(wave_speed, bridge_speed) * 60.0 + 0.1);
+        }
+    });
+    CHECK_FALSE(in_wave);
+    CHECK(wave_paths > 0);
+    CHECK(wave_moves > 0);
+}
+
+TEST_CASE("A wave speed setting does not mark ordinary exported toolpaths as waves", "[WaveOverhangs][Windows]")
+{
+    DynamicPrintConfig config = settings(false);
+    config.set_deserialize_strict({{"wave_overhang_speed", "0.1"}});
+    const std::string gcode = Test::slice({unsupported_shelf()}, config);
+    CHECK(gcode.find("; WAVE_OVERHANG_BEGIN") == std::string::npos);
+    CHECK(gcode.find("; WAVE_OVERHANG_END") == std::string::npos);
 }

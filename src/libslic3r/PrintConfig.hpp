@@ -1586,6 +1586,7 @@ PRINT_CONFIG_CLASS_DEFINE(
     // Experimental wave-overhangs: OFF by default; three-axis Windows prototype.
     ((ConfigOptionBool,                 wave_overhangs))
     ((ConfigOptionFloat,                wave_overhang_line_spacing))
+    ((ConfigOptionFloat,                wave_overhang_speed))
     ((ConfigOptionBoolsNullable,        slowdown_for_curled_perimeters))
     ((ConfigOptionBool,                 hole_to_polyhole))
     ((ConfigOptionFloatOrPercent,       hole_to_polyhole_threshold))
