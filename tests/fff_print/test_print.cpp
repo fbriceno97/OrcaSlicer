@@ -70,10 +70,40 @@
 using namespace Slic3r;
 using namespace Slic3r::Test;
 
+TEST_CASE("Disabled non-planar mode preserves ordinary motion despite stored cut planes", "[Print][CutPlaneSegmentation]")
+{
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"layer_change_gcode", "G92 E0"}, {"enable_nonplanar", "0"}});
+    Print normal;
+    Model model;
+    init_print({cube(8.)}, normal, model, config);
+    const std::string baseline = gcode(normal);
+    CutPlane plane;
+    plane.point = Vec3d(0., 0., 4.);
+    plane.normal = Vec3d(0.2, 0., 1.).normalized();
+    model.objects.front()->cut_planes.enabled = true;
+    model.objects.front()->cut_planes.planes.push_back(plane);
+    Print authored;
+    authored.apply(model, config);
+    const std::string with_planes = gcode(authored);
+    const auto motion = [](const std::string &text) {
+        std::vector<std::string> moves;
+        GCodeReader reader;
+        reader.parse_buffer(text, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
+            if (line.cmd_is("G0") || line.cmd_is("G1") || line.cmd_is("G2") || line.cmd_is("G3"))
+                moves.push_back(line.raw().substr(0, line.raw().find(';')));
+        });
+        return moves;
+    };
+    const auto expected = motion(baseline);
+    REQUIRE_FALSE(expected.empty());
+    CHECK(motion(with_planes) == expected);
+}
+
 TEST_CASE("Editing cut planes invalidates cached slicing and blocks unsupported planar fallback", "[Print][CutPlaneSegmentation]")
 {
     DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
-    config.set_deserialize_strict({{"layer_change_gcode", "G92 E0"}});
+    config.set_deserialize_strict({{"layer_change_gcode", "G92 E0"}, {"enable_nonplanar", "1"}});
     Print print;
     Model model;
     init_print({cube(20.)}, print, model, config);

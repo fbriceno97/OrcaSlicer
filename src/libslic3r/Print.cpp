@@ -126,6 +126,8 @@ namespace Slic3r {
 // collision enforcement are connected and validated together.
 static const ModelObject *unsupported_nonplanar_object(const Print &print)
 {
+    if (!print.config().enable_nonplanar.value)
+        return nullptr;
     const auto requests_direction = [](const ModelConfig &config) {
         for (const char *key : {"layer_rotation_b", "layer_rotation_c"})
             if (config.has(key)) {
@@ -423,6 +425,7 @@ bool Print::invalidate_state_by_config_options(const ConfigOptionResolver & /* n
             // Build plate tilt changes slicing plane orientation.
             || opt_key == "build_plate_tilt_x"
             || opt_key == "build_plate_tilt_y"
+            || opt_key == "enable_nonplanar"
             // Belt printer transform options change the mesh geometry before slicing.
             || opt_key == "belt_printer"
             || opt_key == "belt_slice_rotation"

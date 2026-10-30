@@ -1638,6 +1638,13 @@ PRINT_CONFIG_CLASS_DEFINE(
 PRINT_CONFIG_CLASS_DEFINE(
     MachineEnvelopeConfig,
 
+    ((ConfigOptionBool,                enable_nonplanar))
+    ((ConfigOptionFloat,               nonplanar_hotend_cone_height))
+    ((ConfigOptionFloat,               nonplanar_hotend_angle_xpos))
+    ((ConfigOptionFloat,               nonplanar_hotend_angle_xneg))
+    ((ConfigOptionFloat,               nonplanar_hotend_angle_ypos))
+    ((ConfigOptionFloat,               nonplanar_hotend_angle_yneg))
+
     // Orca: whether emit machine limits into the beginning of the G-code.
     ((ConfigOptionBool,                 emit_machine_limits_to_gcode))
     // M201 X... Y... Z... E... [mm/sec^2]

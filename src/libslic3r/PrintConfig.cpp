@@ -1894,6 +1894,40 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionBool(false));
 
+    // Experimental non-planar settings remain disabled for existing printer profiles.
+    def = this->add("enable_nonplanar", coBool);
+    def->label = L("Experimental non-planar slicing");
+    def->category = L("Non-planar printing");
+    def->tooltip = L("Enable cut-plane authoring and non-planar build directions. Measure the printer's hotend and gantry clearances before use. Physical clearance and printing safety require separate validation.");
+    def->mode = comExpert;
+    def->set_default_value(new ConfigOptionBool(false));
+
+    def = this->add("nonplanar_hotend_cone_height", coFloat);
+    def->label = L("Hotend envelope height");
+    def->category = L("Non-planar printing");
+    def->tooltip = L("Height of the modeled hotend envelope above the nozzle tip. The generic default is not a measured clearance for your printer. Zero disables the hotend model.");
+    def->sidetext = L("mm");
+    def->min = 0.;
+    def->mode = comExpert;
+    def->set_default_value(new ConfigOptionFloat(40.));
+
+    struct HotendSideOption { const char *key; const char *label; };
+    for (const HotendSideOption &side : {
+        HotendSideOption{"nonplanar_hotend_angle_xpos", L("Hotend side angle +X (right)")},
+        HotendSideOption{"nonplanar_hotend_angle_xneg", L("Hotend side angle -X (left)")},
+        HotendSideOption{"nonplanar_hotend_angle_ypos", L("Hotend side angle +Y (back)")},
+        HotendSideOption{"nonplanar_hotend_angle_yneg", L("Hotend side angle -Y (front)")}}) {
+        def = this->add(side.key, coFloat);
+        def->label = side.label;
+        def->category = L("Non-planar printing");
+        def->tooltip = L("Angle of this side of the hotend envelope measured up from the bed plane with the nozzle vertical. Smaller angles describe a wider hotend. Include the fan duct, heater block, probe, and other hardware when measuring.");
+        def->sidetext = L("degrees");
+        def->min = 1.;
+        def->max = 90.;
+        def->mode = comExpert;
+        def->set_default_value(new ConfigOptionFloat(45.));
+    }
+
     // Experimental Unlayered wave-overhangs; never silently enable for existing printer profiles.
     def = this->add("wave_overhangs", coBool);
     def->label = L("Experimental wave overhangs");
