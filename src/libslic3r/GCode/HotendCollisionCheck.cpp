@@ -12,6 +12,9 @@
 
 #include <boost/format.hpp>
 #include <boost/log/trivial.hpp>
+#include <boost/geometry/geometries/point.hpp>
+#include <boost/geometry/geometries/box.hpp>
+#include <boost/geometry/index/rtree.hpp>
 
 #include <algorithm>
 #include <array>
@@ -20,6 +23,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <limits>
+#include <iterator>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -35,6 +39,7 @@ struct Sample
 {
     Vec3d        p;        // bed frame
     unsigned int gcode_id; // originating G-code line
+    double       order;    // move index plus interpolation fraction, for chronological queries
 };
 
 struct Episode
@@ -47,7 +52,7 @@ struct Episode
     std::vector<Sample> material;  // extrusions, sampled every 0.5 mm
 };
 
-void sample_segment(const Vec3d &a, const Vec3d &b, double step, unsigned int gcode_id, std::vector<Sample> &out)
+void sample_segment(const Vec3d &a, const Vec3d &b, double step, unsigned int gcode_id, size_t move_index, std::vector<Sample> &out)
 {
     const Vec3d  d   = b - a;
     const double len = d.norm();
@@ -55,7 +60,7 @@ void sample_segment(const Vec3d &a, const Vec3d &b, double step, unsigned int gc
         throw std::invalid_argument("G-code move exceeds hotend collision sampling limits");
     const int    n   = std::max(2, int(len / step) + 1);
     for (int i = 0; i < n; ++ i)
-        out.push_back({a + d * (double(i) / double(n - 1)), gcode_id});
+        out.push_back({a + d * (double(i) / double(n - 1)), gcode_id, double(move_index) + double(i) / double(n - 1)});
 }
 
 // Summed-area table of a 0/1 grid: count() is the number of set cells in an inclusive rectangle
@@ -136,6 +141,8 @@ std::optional<ConflictResult> check_hotend_collisions(const GCodeProcessorResult
         return axis.normalized();
     };
     for (size_t i = 1; i < result.moves.size(); ++ i) {
+        if (params.throw_on_cancel && i % 1024 == 1)
+            params.throw_on_cancel();
         const auto &prev = result.moves[i - 1];
         const auto &m    = result.moves[i];
         const Vec3d axis = axis_of(m);
@@ -156,11 +163,11 @@ std::optional<ConflictResult> check_hotend_collisions(const GCodeProcessorResult
             throw std::invalid_argument("G-code position exceeds hotend collision coordinate limits");
         if ((b - a).norm() < 1e-9)
             continue;
-        sample_segment(a, b, 1.0, m.gcode_id, e.tips);
+        sample_segment(a, b, 1.0, m.gcode_id, i, e.tips);
         if (m.type == EMoveType::Extrude && m.delta_extruder > 0.f)
-            sample_segment(a, b, 0.5, m.gcode_id, e.material);
+            sample_segment(a, b, 0.5, m.gcode_id, i, e.material);
     }
-    if (episodes.size() < 2)
+    if (episodes.empty())
         return std::nullopt;
 
     // The envelope is the four-face pyramid clipped by a sphere of radius H about the tip (the
@@ -200,6 +207,8 @@ std::optional<ConflictResult> check_hotend_collisions(const GCodeProcessorResult
     std::vector<Sample> earlier;
     std::vector<size_t> earlier_episode;
     for (size_t ei = 0; ei < episodes.size(); ++ ei) {
+        if (params.throw_on_cancel)
+            params.throw_on_cancel();
         const Episode &e = episodes[ei];
         if (ei > 0 && ! earlier.empty() && ! e.tips.empty()) {
             // head frame: (u, v, a) = R * p, with u / v along the head's own +X / +Y faces
@@ -303,6 +312,59 @@ std::optional<ConflictResult> check_hotend_collisions(const GCodeProcessorResult
                         worst.tip = e.tips[best]; worst.mat = earlier[q.sample]; worst.height = h; worst.face = best_face;
                     }
                 }
+            }
+        }
+        if (params.upright && !params.ac && worst.pen < 0. && !e.material.empty()) {
+            // Insert material only after its deposition time. This catches downhill
+            // motion and travel within a section, while avoiding queries against
+            // layers that have not been printed yet. Planar rising layers prune
+            // quickly because their earlier material is below the query box.
+            namespace bg = boost::geometry;
+            namespace bgi = boost::geometry::index;
+            using SpatialPoint = bg::model::point<double, 3, bg::cs::cartesian>;
+            using Entry = std::pair<SpatialPoint, size_t>;
+            bgi::rtree<Entry, bgi::quadratic<16>> deposited;
+            std::vector<Entry> candidates;
+            size_t next_material = 0;
+            size_t checked_tips = 0;
+            for (const Sample &tip : e.tips) {
+                if (params.throw_on_cancel && checked_tips++ % 1024 == 0)
+                    params.throw_on_cancel();
+                while (next_material < e.material.size() && e.material[next_material].order < tip.order) {
+                    const Vec3d &p = e.material[next_material].p;
+                    deposited.insert({SpatialPoint(p.x(), p.y(), p.z()), next_material++});
+                }
+                const double reach = H + params.margin;
+                const bg::model::box<SpatialPoint> box(
+                    SpatialPoint(tip.p.x() - reach, tip.p.y() - reach, tip.p.z() + params.eps),
+                    SpatialPoint(tip.p.x() + reach, tip.p.y() + reach, tip.p.z() + H));
+                candidates.clear();
+                deposited.query(bgi::intersects(box), std::back_inserter(candidates));
+                for (const Entry &candidate : candidates) {
+                    const Sample &material = e.material[candidate.second];
+                    const Vec3d delta = material.p - tip.p;
+                    const double h = delta.z();
+                    if (h <= params.eps || h >= H)
+                        continue;
+                    const Reach r = reach_at(h);
+                    const double cap = chord_at(h) + params.margin;
+                    if (delta.head<2>().squaredNorm() > cap * cap)
+                        continue;
+                    const double slack[4] = {r.xpos - delta.x(), r.xneg + delta.x(), r.ypos - delta.y(), r.yneg + delta.y()};
+                    const auto face = std::min_element(slack, slack + 4);
+                    if (*face < 0.)
+                        continue;
+                    worst.pen = *face;
+                    worst.episode = worst.source = ei;
+                    worst.tip = tip;
+                    worst.mat = material;
+                    worst.height = h;
+                    worst.face = HotendEnvelope::Side(face - slack);
+                    ++total_hits;
+                    break;
+                }
+                if (worst.pen >= 0.)
+                    break;
             }
         }
         for (const Sample &s : e.material) { earlier.push_back(s); earlier_episode.push_back(ei); }

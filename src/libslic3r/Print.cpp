@@ -3913,6 +3913,7 @@ void Print::validate_nonplanar_gcode(const GCodeProcessorResult &result) const
     if (!has_sections && result.tool_axes.size() <= 1)
         return;
     HotendCollisionParams params;
+    params.throw_on_cancel = [this]() { throw_if_canceled(); };
     params.envelope = HotendEnvelope::from_config(m_config);
     if (!params.envelope.enabled())
         throw SlicingError(_u8L("Non-planar G-code requires an enabled hotend envelope for collision checks."));

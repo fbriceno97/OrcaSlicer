@@ -7,6 +7,7 @@
 #include "TrunnionAC.hpp"
 
 #include <optional>
+#include <functional>
 
 namespace Slic3r {
 
@@ -26,6 +27,7 @@ namespace Slic3r {
 // nozzle never tilts, so `upright` holds the pyramid vertical with its faces along machine X/Y
 // whatever axis the chunk was tagged with. Ordinary planar output without section markers is
 // skipped; sections with matching build axes still have their transitions checked.
+// Upright nozzles also check earlier deposition within the same episode in motion order.
 struct HotendCollisionParams
 {
     HotendEnvelope envelope;          // height <= 0 disables the check
@@ -36,9 +38,10 @@ struct HotendCollisionParams
     std::optional<TrunnionAC::Machine> ac;
     double         margin  = 0.5;     // lateral tolerance on every face (line width / 2 + nozzle flat), mm
     double         eps     = 0.3;     // ignore material within this height above the tip: the layer being printed
+    std::function<void()> throw_on_cancel;
 };
 
-// Returns a ConflictResult describing the worst hit (with `message` set), or nullopt when the
+// Returns a ConflictResult describing a detected hit (with `message` set), or nullopt when the
 // envelope stays clear of all earlier material. _objName1/_objName2 name the printing chunk and the
 // hit material's chunk, _height is the machine Z of the offending tip position.
 std::optional<ConflictResult> check_hotend_collisions(const GCodeProcessorResult &result, const HotendCollisionParams &params);

@@ -16,6 +16,8 @@
 #include <limits>
 #include <fstream>
 #include <stdexcept>
+#include <vector>
+#include <cstddef>
 
 using namespace Slic3r;
 
@@ -61,6 +63,47 @@ TEST_CASE("A lifted transition outside earlier material stays clear", "[HotendCo
     GCodeProcessorResult result;
     sample_sections(result, true, tilted);
     CHECK_FALSE(check_hotend_collisions(result, HotendCollisionParams{}).has_value());
+}
+
+TEST_CASE("Earlier material is checked within a single section in motion order", "[HotendCollision]")
+{
+    const bool clear = GENERATE(false, true);
+    GCodeProcessorResult result;
+    sample_sections(result, clear, false);
+    for (auto &move : result.moves)
+        move.cut_segment_id = 0;
+    CHECK(check_hotend_collisions(result, HotendCollisionParams{}).has_value() == !clear);
+}
+
+TEST_CASE("Travel is not rejected for material deposited later in the same section", "[HotendCollision]")
+{
+    GCodeProcessorResult result;
+    const std::vector<Vec3f> positions {Vec3f(0.f, 0.f, 0.f), Vec3f(10.f, 0.f, 0.f),
+        Vec3f(10.f, 0.f, 10.f), Vec3f(0.f, 0.f, 10.f)};
+    for (size_t i = 0; i < positions.size(); ++i) {
+        GCodeProcessorResult::MoveVertex move;
+        move.position = positions[i];
+        move.type = i == 0 ? EMoveType::Noop : (i == 3 ? EMoveType::Extrude : EMoveType::Travel);
+        move.delta_extruder = i == 3 ? 1.f : 0.f;
+        move.cut_segment_id = 0;
+        move.gcode_id = static_cast<unsigned>(i + 1);
+        result.moves.push_back(move);
+    }
+    CHECK_FALSE(check_hotend_collisions(result, HotendCollisionParams{}).has_value());
+}
+
+TEST_CASE("Long clearance checks propagate cancellation", "[HotendCollision]")
+{
+    GCodeProcessorResult result;
+    sample_sections(result, false, false);
+    HotendCollisionParams params;
+    bool cancellation_checked = false;
+    params.throw_on_cancel = [&]() {
+        cancellation_checked = true;
+        throw std::runtime_error("Canceled clearance check");
+    };
+    CHECK_THROWS_AS(check_hotend_collisions(result, params), std::runtime_error);
+    CHECK(cancellation_checked);
 }
 
 TEST_CASE("Invalid metadata and positions cannot be reported as collision-free", "[HotendCollision]")
