@@ -41,6 +41,7 @@
 #include "libslic3r/Polygon.hpp"
 #include "libslic3r/Model.hpp"
 #include "libslic3r/GCodeReader.hpp"
+#include "libslic3r/GCode.hpp"
 #include "libslic3r/GCode/GCodeProcessor.hpp"
 #include "libslic3r/Exception.hpp"
 #include "libslic3r/LifecycleEvents.hpp"
@@ -165,6 +166,15 @@ TEST_CASE("Cut sections retain separate instance identities and reuse unchanged 
     size_t plan_index = 0;
     for (const PrintObject *section : print.objects())
         CHECK(section == original_plan[plan_index++]);
+    const auto ordered = sort_object_instances_by_model_order(print, true);
+    REQUIRE(ordered.size() == 4);
+    CHECK(ordered[0]->model_instance == ordered[1]->model_instance);
+    CHECK(ordered[2]->model_instance == ordered[3]->model_instance);
+    CHECK(ordered[0]->model_instance != ordered[2]->model_instance);
+    CHECK(ordered[0]->print_object->segment_index() == 0);
+    CHECK(ordered[1]->print_object->segment_index() == 1);
+    CHECK(ordered[2]->print_object->segment_index() == 0);
+    CHECK(ordered[3]->print_object->segment_index() == 1);
     CHECK_THROWS_AS(print.process(), SlicingError);
 
     config.set_deserialize_strict({{"enable_nonplanar", "0"}});

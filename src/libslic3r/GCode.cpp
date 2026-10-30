@@ -55,6 +55,7 @@
 #include <Eigen/Geometry>
 #include <Shiny/ShinyMacros.h>
 #include <algorithm>
+#include <unordered_map>
 #include <cctype>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/filesystem/operations.hpp>
@@ -3196,6 +3197,40 @@ static inline std::vector<const PrintInstance*> sort_object_instances_by_max_z(c
 //BBS: add sort logic for seq-print
 std::vector<const PrintInstance*> sort_object_instances_by_model_order(const Print& print, bool init_order)
 {
+    const bool section_mode = print.config().enable_nonplanar.value &&
+        std::any_of(print.objects().begin(), print.objects().end(), [](const PrintObject *object) {
+            return object->segment().has_value();
+        });
+    if (section_mode) {
+        // A single ModelInstance now owns several PrintInstances. Preserve all
+        // of them and finish its sections before advancing to another copy.
+        std::unordered_map<const ModelInstance *, std::vector<const PrintInstance *>> by_instance;
+        for (const PrintObject *object : print.objects())
+            for (const PrintInstance &instance : object->instances())
+                by_instance[instance.model_instance].push_back(&instance);
+        std::vector<std::vector<const PrintInstance *>> groups;
+        for (const ModelObject *object : print.model().objects)
+            for (ModelInstance *instance : object->instances) {
+                auto found = by_instance.find(instance);
+                if (found == by_instance.end())
+                    continue;
+                auto group = std::move(found->second);
+                std::stable_sort(group.begin(), group.end(), [](const PrintInstance *a, const PrintInstance *b) {
+                    return a->print_object->segment_index() < b->print_object->segment_index();
+                });
+                if (init_order)
+                    instance->arrange_order = static_cast<int>(groups.size() + 1);
+                groups.push_back(std::move(group));
+            }
+        std::stable_sort(groups.begin(), groups.end(), [](const auto &a, const auto &b) {
+            return a.front()->model_instance->arrange_order < b.front()->model_instance->arrange_order;
+        });
+        std::vector<const PrintInstance *> instances;
+        instances.reserve(print.num_object_instances());
+        for (const auto &group : groups)
+            instances.insert(instances.end(), group.begin(), group.end());
+        return instances;
+    }
     auto find_object_index = [](const Model& model, const ModelObject* obj) {
         for (int index = 0; index < model.objects.size(); index++)
         {
