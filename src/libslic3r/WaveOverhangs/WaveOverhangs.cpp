@@ -12,10 +12,14 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <limits>
 #include <unordered_map>
 #include <utility>
+#include <tuple>
+#include <vector>
 
 #include "Algorithm/RegionExpansion.hpp"
 #include "BoundingBox.hpp"
@@ -23,9 +27,13 @@
 #include "ClipperUtils.hpp"
 #include "ExtrusionEntity.hpp"
 #include "ExPolygon.hpp"
+#include "Flow.hpp"
 #include "Geometry/ConvexHull.hpp"
 #include "Line.hpp"
 #include "Polyline.hpp"
+#include "Point.hpp"
+#include "Polygon.hpp"
+#include "PrintConfig.hpp"
 #include "libslic3r.h"
 
 namespace Slic3r::WaveOverhangs {

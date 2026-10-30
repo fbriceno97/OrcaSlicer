@@ -6,7 +6,13 @@
 ///|/ Released under the terms of the AGPLv3 or higher.
 ///|/
 #include "AndersonsGenerator.hpp"
+#include "IGenerator.hpp"
 #include "WaveOverhangs.hpp"
+#include "libslic3r/ExPolygon.hpp"
+#include "libslic3r/Polygon.hpp"
+#include "libslic3r/libslic3r.h"
+
+#include <utility>
 
 namespace Slic3r::WaveOverhangs {
 

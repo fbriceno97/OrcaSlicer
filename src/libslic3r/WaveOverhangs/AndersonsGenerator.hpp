@@ -9,6 +9,8 @@
 #define slic3r_WaveOverhangs_AndersonsGenerator_hpp_
 
 #include "IGenerator.hpp"
+#include "libslic3r/ExPolygon.hpp"
+#include "libslic3r/Polygon.hpp"
 
 namespace Slic3r::WaveOverhangs {
 
