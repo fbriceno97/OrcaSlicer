@@ -623,7 +623,9 @@ jobs:
           path: ${{ github.workspace }}/${{ env.BUILD_DIR }}/OrcaSlicer
 
       - name: Upload artifacts Win installer
-        if: runner.os == 'Windows' && !vars.SELF_HOSTED
+        # Build/install locally for branding checks, but do not publish an
+        # experimental installer before integration and software checks pass.
+        if: runner.os == 'Windows' && !vars.SELF_HOSTED && !(github.repository == 'fbriceno97/OrcaSlicer' && (github.head_ref == 'feature/unlayered-wave-nonplanar' || github.ref_name == 'feature/unlayered-wave-nonplanar'))
         uses: actions/upload-artifact@v7
         with:
           name: OrcaSlicer_Windows_${{ env.ver }}${{ env.ARCH_SUFFIX }}
@@ -681,7 +683,7 @@ jobs:
             -PublisherDisplayName "${{ vars.ORCA_MSIX_PUBLISHER_DISPLAY_NAME || 'OrcaSlicer' }}"
 
       - name: Upload artifacts Win MSIX
-        if: runner.os == 'Windows' && !vars.SELF_HOSTED
+        if: runner.os == 'Windows' && !vars.SELF_HOSTED && !(github.repository == 'fbriceno97/OrcaSlicer' && (github.head_ref == 'feature/unlayered-wave-nonplanar' || github.ref_name == 'feature/unlayered-wave-nonplanar'))
         uses: actions/upload-artifact@v7
         with:
           name: OrcaSlicer_Windows_MSIX_${{ env.ver }}${{ env.ARCH_SUFFIX }}
