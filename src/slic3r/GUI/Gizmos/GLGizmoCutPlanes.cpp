@@ -1,8 +1,15 @@
 #include "GLGizmoCutPlanes.hpp"
+#include "GLGizmoCut.hpp"
+#include "CommonGizmosDataPool.hpp"
 
 #include "slic3r/GUI/3DScene.hpp"
 #include "slic3r/GUI/Camera.hpp"
 #include "slic3r/GUI/GLCanvas3D.hpp"
+#include "slic3r/GUI/GLModel.hpp"
+#include "slic3r/GUI/GLShader.hpp"
+#include "slic3r/GUI/ImGuiWrapper.hpp"
+#include "slic3r/GUI/I18N.hpp"
+#include "slic3r/GUI/Selection.hpp"
 #include "slic3r/GUI/GUI.hpp"
 #include "slic3r/GUI/GUI_App.hpp"
 #include "slic3r/GUI/GUI_ObjectList.hpp"
@@ -12,6 +19,12 @@
 #include "slic3r/GUI/format.hpp"
 #include "slic3r/Utils/UndoRedo.hpp"
 #include "libslic3r/ClipperUtils.hpp"
+#include "libslic3r/CutPlaneSegmentation.hpp"
+#include "libslic3r/BoundingBox.hpp"
+#include "libslic3r/ExPolygon.hpp"
+#include "libslic3r/Polygon.hpp"
+#include "libslic3r/Line.hpp"
+#include "libslic3r/libslic3r.h"
 #include "libslic3r/Utils.hpp"
 #include <wx/utils.h>
 #include "libslic3r/Geometry.hpp"
@@ -28,7 +41,9 @@
 #include "libslic3r/TriangleMesh.hpp"
 #include "libslic3r/TriangleMeshSlicer.hpp"
 
-#include <GL/glew.h>
+#include <glad/gl.h>
+#include <Eigen/Geometry>
+#include <cereal/archives/binary.hpp>
 
 #include <algorithm>
 #include <numeric>
@@ -41,7 +56,8 @@
 #include <utility>
 #include <vector>
 
-#include "imgui/imgui_internal.h"
+#include <imgui.h>
+#include <imgui_internal.h>
 #include <wx/filesys.h>
 #include <wx/filename.h>
 

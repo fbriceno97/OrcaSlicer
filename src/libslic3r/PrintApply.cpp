@@ -4,6 +4,7 @@
 #include "CustomGCode.hpp"
 #include "Config.hpp"
 #include "Model.hpp"
+#include "CutPlanes.hpp"
 #include "Point.hpp"
 #include "Polygon.hpp"
 #include "Print.hpp"
