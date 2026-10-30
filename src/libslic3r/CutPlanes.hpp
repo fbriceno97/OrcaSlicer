@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Point.hpp"
+#include <string>
 #include <vector>
 
 namespace Slic3r {
@@ -39,4 +40,8 @@ struct CutPlaneStack
     bool operator!=(const CutPlaneStack &rhs) const { return !(*this == rhs); }
     template<class Archive> void serialize(Archive &ar) { ar(enabled, user_ordered, planes); }
 };
+
+inline constexpr const char *cut_planes_metadata_key = "orca_cut_planes_v1";
+std::string cut_plane_stack_to_json(const CutPlaneStack &stack);
+CutPlaneStack cut_plane_stack_from_json(const std::string &text);
 } // namespace Slic3r

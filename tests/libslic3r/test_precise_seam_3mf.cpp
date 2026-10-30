@@ -7,6 +7,7 @@
 #include <catch2/catch_message.hpp>
 #include "test_utils.hpp"
 #include "libslic3r/Model.hpp"
+#include "libslic3r/CutPlanes.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Preset.hpp"
 #include "libslic3r/Semver.hpp"
@@ -216,6 +217,37 @@ void check_geometry(const ModelVolume &before, const ModelVolume &after)
     CHECK(expected.empty());
 }
 } // namespace
+
+TEST_CASE("Cut-plane metadata coexists with precise seam modifiers in both 3MF formats", "[PreciseSeam3mf][CutPlaneSegmentation]")
+{
+    const auto backend = GENERATE(Backend::Bbs, Backend::Prusa);
+    const bool enabled = GENERATE(false, true);
+    Scene source;
+    source.populate(false);
+    CutPlaneStack &stack = source.model.objects.front()->cut_planes;
+    stack.enabled = enabled;
+    stack.user_ordered = true;
+    CutPlane plane;
+    plane.point = Vec3d(2., -3., 7.5);
+    plane.normal = Vec3d(1., 0., 1.).normalized();
+    plane.build_normal = Vec3d(0., 1., 1.).normalized();
+    plane.has_build_normal = true;
+    stack.planes.push_back(plane);
+    plane.enabled = false;
+    stack.planes.push_back(plane);
+
+    ScopedTemporaryFile path(".3mf");
+    save(path.string(), backend, source);
+    Scene destination;
+    load(path.string(), backend, destination);
+    REQUIRE(destination.model.objects.size() == 1);
+    const ModelObject &restored = *destination.model.objects.front();
+    CHECK(restored.cut_planes == stack);
+    REQUIRE(restored.volumes.size() == 2);
+    CHECK(restored.volumes[1]->type() == ModelVolumeType::PRECISE_SEAM_CENTER);
+    check_config(*restored.volumes[1]);
+    check_geometry(*source.model.objects.front()->volumes[0], *restored.volumes[0]);
+}
 
 TEST_CASE("All Precise Seam types and dormant settings survive a 3MF round trip", "[PreciseSeam3mf]")
 {

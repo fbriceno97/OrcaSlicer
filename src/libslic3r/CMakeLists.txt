@@ -120,6 +120,7 @@ set(lisbslic3r_sources
     CutUtils.cpp
     CutUtils.hpp
     CutPlanes.hpp
+    CutPlanes.cpp
     CutPlaneSegmentation.cpp
     CutPlaneSegmentation.hpp
     EdgeGrid.cpp

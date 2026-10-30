@@ -19,6 +19,30 @@
 using namespace Slic3r;
 using Catch::Matchers::WithinAbs;
 
+TEST_CASE("Cut-plane metadata retains disabled planes and independent build directions", "[CutPlaneSegmentation]")
+{
+    CutPlaneStack stack;
+    stack.enabled = true;
+    stack.user_ordered = true;
+    CutPlane plane;
+    plane.point = Vec3d(1.25, -3.5, 10.);
+    plane.normal = Vec3d(0.3, 0.4, 0.5);
+    plane.build_normal = Vec3d::UnitZ();
+    plane.has_build_normal = true;
+    plane.enabled = false;
+    stack.planes.push_back(plane);
+    CHECK(cut_plane_stack_from_json(cut_plane_stack_to_json(stack)) == stack);
+}
+
+TEST_CASE("Cut-plane metadata rejects unknown versions and nonfinite coordinates", "[CutPlaneSegmentation]")
+{
+    CHECK_THROWS_AS(cut_plane_stack_from_json("{\"version\":2,\"planes\":[]}"), std::invalid_argument);
+    CutPlaneStack stack;
+    stack.planes.emplace_back();
+    stack.planes.front().point.x() = std::numeric_limits<double>::quiet_NaN();
+    CHECK_THROWS_AS(cut_plane_stack_to_json(stack), std::invalid_argument);
+}
+
 TEST_CASE("Build orientation rejects zero and nonfinite normals", "[CutPlaneSegmentation]")
 {
     double b = 0., c = 0.;

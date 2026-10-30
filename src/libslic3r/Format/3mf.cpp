@@ -1,6 +1,7 @@
 #include "../libslic3r.h"
 #include "../Exception.hpp"
 #include "../Model.hpp"
+#include "../CutPlanes.hpp"
 #include "../Utils.hpp"
 #include "../LocalesUtils.hpp"
 #include "../Geometry.hpp"
@@ -942,6 +943,14 @@ ModelVolumeType type_from_string(const std::string &s)
                 for (const Metadata& metadata : obj_metadata->second.metadata) {
                     if (metadata.key == "name")
                         model_object->name = metadata.value;
+                    else if (metadata.key == cut_planes_metadata_key) {
+                        try {
+                            model_object->cut_planes = cut_plane_stack_from_json(metadata.value);
+                        } catch (const std::exception &error) {
+                            add_error(std::string("Invalid cut-plane metadata: ") + error.what());
+                            return false;
+                        }
+                    }
                     else
                         model_object->config.set_deserialize(metadata.key, metadata.value, config_substitutions);
                 }
@@ -3174,6 +3183,11 @@ ModelVolumeType type_from_string(const std::string &s)
                 // stores object's name
                 if (!obj->name.empty())
                     stream << "  <" << METADATA_TAG << " " << TYPE_ATTR << "=\"" << OBJECT_TYPE << "\" " << KEY_ATTR << "=\"name\" " << VALUE_ATTR << "=\"" << xml_escape(obj->name) << "\"/>\n";
+
+                if (!obj->cut_planes.empty() || obj->cut_planes.enabled || obj->cut_planes.user_ordered)
+                    stream << "  <" << METADATA_TAG << " " << TYPE_ATTR << "=\"" << OBJECT_TYPE << "\" "
+                           << KEY_ATTR << "=\"" << cut_planes_metadata_key << "\" " << VALUE_ATTR << "=\""
+                           << xml_escape(cut_plane_stack_to_json(obj->cut_planes)) << "\"/>\n";
 
                 // stores object's config data
                 for (const std::string& key : obj->config.keys()) {
