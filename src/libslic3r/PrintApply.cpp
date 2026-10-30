@@ -227,7 +227,7 @@ static std::vector<PrintObjectTrafoAndInstances> print_objects_from_model_object
             trafo.trafo.data()[13] = 0;
             // A tilted section's frame pivots around its own instance placement.
             // Keep copies distinct using identity, without perturbing their geometry.
-            trafo.instance_key = enable_nonplanar && (model_object.cut_planes.active() || object_has_directed_parts(model_object))
+            trafo.instance_key = enable_nonplanar && (model_object.cut_planes.active() || object_has_directed_parts(model_object) || object_has_build_direction(model_object))
                 ? model_instance->id().id : 0;
             // Belt printer global mode: prevent instance grouping so each
             // copy gets its own PrintObject with independent layer Z values.

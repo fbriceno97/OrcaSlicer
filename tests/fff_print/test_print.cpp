@@ -262,6 +262,42 @@ TEST_CASE("Directed parts retain modifier bindings without slicing another secti
     CHECK_THROWS_AS(print.process(), SlicingError);
 }
 
+TEST_CASE("Whole-object directions slice above the physical bed without mutating the model", "[Print][CutPlaneSegmentation]")
+{
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"layer_height", "0.2"},
+        {"initial_layer_print_height", "0.2"}});
+    Print print;
+    Model model;
+    init_print({cube(20.)}, print, model, config);
+    model.objects.front()->config.set_key_value("layer_rotation_b", new ConfigOptionFloat(-20.));
+    model.objects.front()->config.set_key_value("layer_rotation_c", new ConfigOptionFloat(30.));
+    print.apply(model, config);
+    REQUIRE(print.objects().size() == 1);
+    PrintObject *section = print.objects().front();
+    REQUIRE(section->segment().has_value());
+    section->slice();
+    REQUIRE_FALSE(section->layers().empty());
+    const Transform3d to_model = section->trafo_sliced().inverse();
+    size_t checked_vertices = 0;
+    for (const Layer *layer : section->layers())
+        for (const LayerRegion *region : layer->regions())
+            for (const Surface &surface : region->slices.surfaces)
+                for (const Point &point : surface.expolygon.contour.points) {
+                    const Vec3d local = to_model * Vec3d(unscale<double>(point.x()), unscale<double>(point.y()), layer->slice_z);
+                    const Vec3d placed = section->trafo() * local;
+                    CHECK(placed.z() >= -0.01);
+                    CHECK(local.x() >= -0.01);
+                    CHECK(local.x() <= 20.01);
+                    CHECK(local.y() >= -0.01);
+                    CHECK(local.y() <= 20.01);
+                    ++checked_vertices;
+                }
+    CHECK(checked_vertices > 0);
+    CHECK(model.objects.front()->cut_planes.planes.empty());
+    CHECK_THROWS_AS(print.process(), SlicingError);
+}
+
 TEST_CASE("Timelapse g-code is emitted once per layer for Bambu and non-Bambu printers", "[Print][Regression]")
 {
     struct PrinterCase {

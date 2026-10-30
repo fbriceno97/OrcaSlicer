@@ -214,6 +214,7 @@ indexed_triangle_set merged_model_part_mesh(const ModelObject &mo, bool exclude_
 // that direction; the remaining parts stay together in the root (and in the plane partition).
 bool model_volume_has_build_direction(const ModelVolume &mv);
 bool object_has_directed_parts(const ModelObject &mo);
+bool object_has_build_direction(const ModelObject &mo);
 // Does `mv` contribute material to the PrintObject carrying `segment` (nullptr = not segmented)?
 // A part segment owns exactly its part; every other segment owns the undirected parts. Negative
 // volumes and modifiers belong to every segment: they only ever subtract from or tag what is there.
@@ -226,7 +227,8 @@ bool segment_includes_volume(const CutSegmentDescriptor *segment, const ModelVol
 void append_part_segments(const ModelObject &mo, const indexed_triangle_set &merged,
                           const Transform3d &instance_transform,
                           std::vector<CutSegmentDescriptor> &segments,
-                          std::vector<indexed_triangle_set> *out_meshes);
+                          std::vector<indexed_triangle_set> *out_meshes,
+                          const Vec3d &root_build_normal_world = Vec3d::UnitZ());
 
 // Core derivation over an EXPLICIT plane list, so a caller can derive a partition that is not (yet)
 // the one stored on the object -- the chunk preview uses it to include the plane currently under

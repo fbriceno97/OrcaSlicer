@@ -9,10 +9,12 @@
 #include "libslic3r/TriangleMesh.hpp"
 #include "libslic3r/Point.hpp"
 #include "libslic3r/PrintConfig.hpp"
+#include "libslic3r/Config.hpp"
 #include "libslic3r/Polygon.hpp"
 #include "libslic3r/ExPolygon.hpp"
 #include "libslic3r/libslic3r.h"
 #include <Eigen/Geometry>
+#include <Eigen/LU>
 
 #include <cmath>
 #include <cstddef>
@@ -766,4 +768,47 @@ TEST_CASE("A tilted segment that reaches the build plate carries the plate as a 
     const auto clear = derive_cut_segments(*mo, lifted);
     REQUIRE(clear.size() == 2);
     CHECK(! clear[1].has_bed_clip());
+}
+
+TEST_CASE("Whole-object build directions derive a bed-clipped root in the configured world direction", "[CutPlaneSegmentation]")
+{
+    Model model;
+    ModelObject *object = make_object(model, {make_cube(20., 20., 20.)});
+    object->config.set_key_value("layer_rotation_b", new ConfigOptionFloat(-30.));
+    object->config.set_key_value("layer_rotation_c", new ConfigOptionFloat(45.));
+    Transform3d instance = Transform3d::Identity();
+    instance.rotate(Eigen::AngleAxisd(0.3, Vec3d::UnitZ()));
+    instance.scale(Vec3d(1.5, 1., 0.5));
+    CutSegmentationStatus status = CutSegmentationStatus::StackInactive;
+    const auto sections = derive_cut_segments(*object, instance, 0., &status);
+    REQUIRE(status == CutSegmentationStatus::Ok);
+    REQUIRE(sections.size() == 1);
+    CHECK(sections.front().is_root());
+    CHECK_FALSE(sections.front().root_builds_up);
+    CHECK(sections.front().has_bed_clip());
+    const Vec3d world = (instance.linear().inverse().transpose() * sections.front().build_normal).normalized();
+    const Vec3d expected = Geometry::build_normal_from_bc(-30., 45.);
+    CHECK_THAT((world - expected).norm(), WithinAbs(0., 1e-9));
+    CHECK(sections.front().build_z_max > sections.front().build_z_min);
+    CHECK(derive_cut_segments(*object, instance, 1000., &status).empty());
+    CHECK(status == CutSegmentationStatus::SegmentTooThin);
+
+    object->config.set_key_value("layer_rotation_b", new ConfigOptionFloat(std::numeric_limits<double>::quiet_NaN()));
+    CHECK(derive_cut_segments(*object, instance, 0., &status).empty());
+    CHECK(status == CutSegmentationStatus::InvalidGeometry);
+}
+
+TEST_CASE("An invalid plane cannot silently fall back to directed parts", "[CutPlaneSegmentation]")
+{
+    Model model;
+    ModelObject *object = make_object(model, {make_cube(20., 20., 20.), make_cube(10., 10., 10.)});
+    object->volumes.back()->config.set_key_value("layer_rotation_b", new ConfigOptionFloat(0.));
+    object->cut_planes.enabled = true;
+    object->cut_planes.planes.push_back(plane_at(Vec3d(10., 10., 10.), Vec3d::UnitZ()));
+    object->cut_planes.planes.front().point.x() = std::numeric_limits<double>::quiet_NaN();
+    CutSegmentationStatus status = CutSegmentationStatus::Ok;
+    std::vector<indexed_triangle_set> meshes;
+    CHECK(derive_cut_segments(*object, Transform3d::Identity(), 0., &status, &meshes).empty());
+    CHECK(status == CutSegmentationStatus::InvalidGeometry);
+    CHECK(meshes.empty());
 }

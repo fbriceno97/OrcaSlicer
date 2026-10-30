@@ -25,8 +25,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <initializer_list>
 #include <map>
 #include <string>
+#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -187,6 +189,49 @@ bool object_has_directed_parts(const ModelObject &mo)
     return false;
 }
 
+bool object_has_build_direction(const ModelObject &mo)
+{
+    for (const char *key : {"layer_rotation_b", "layer_rotation_c"})
+        if (mo.config.has(key)) {
+            const double angle = mo.config.opt_float(key);
+            if (!std::isfinite(angle) || std::abs(angle) > EPSILON)
+                return true;
+        }
+    return false;
+}
+
+static CutSegmentDescriptor root_segment(const indexed_triangle_set &mesh, const Transform3d &instance_transform,
+                                         const Vec3d &normal_world)
+{
+    CutSegmentDescriptor root;
+    root.index = 0;
+    root.build_normal = (instance_transform.linear().transpose() * normal_world).normalized();
+    root.root_builds_up = (normal_world - Vec3d::UnitZ()).norm() < EPSILON;
+    root.build_z_min = std::numeric_limits<double>::max();
+    root.build_z_max = std::numeric_limits<double>::lowest();
+    HorizontalExtent extent;
+    for (const stl_vertex &v : mesh.vertices) {
+        const Vec3d p = instance_transform * v.cast<double>();
+        if (!p.allFinite())
+            throw std::invalid_argument("Nonfinite root-section geometry");
+        const double h = normal_world.dot(p);
+        root.build_z_min = std::min(root.build_z_min, h);
+        root.build_z_max = std::max(root.build_z_max, h);
+        extent.add(p);
+    }
+    root.build_reach_max = extent.reach();
+    if (min_bed_height(mesh, instance_transform) < BED_CLIP_REACH) {
+        double lo = std::numeric_limits<double>::max(), hi = std::numeric_limits<double>::lowest();
+        extend_above_bed(mesh, instance_transform, normal_world, lo, hi);
+        root.clips.push_back(make_bed_clip(instance_transform));
+        if (lo <= hi) {
+            root.build_z_min = lo;
+            root.build_z_max = hi;
+        }
+    }
+    return root;
+}
+
 bool segment_includes_volume(const CutSegmentDescriptor *segment, const ModelVolume &mv)
 {
     if (segment == nullptr || ! mv.is_model_part())
@@ -199,7 +244,8 @@ bool segment_includes_volume(const CutSegmentDescriptor *segment, const ModelVol
 void append_part_segments(const ModelObject &mo, const indexed_triangle_set &merged,
                           const Transform3d &instance_transform,
                           std::vector<CutSegmentDescriptor> &segments,
-                          std::vector<indexed_triangle_set> *out_meshes)
+                          std::vector<indexed_triangle_set> *out_meshes,
+                          const Vec3d &root_build_normal_world)
 {
     std::vector<const ModelVolume*> directed;
     for (const ModelVolume *mv : mo.volumes)
@@ -209,20 +255,7 @@ void append_part_segments(const ModelObject &mo, const indexed_triangle_set &mer
         return;
 
     if (segments.empty() && ! merged.indices.empty()) {
-        // No plane partition: the undirected parts are the root on their own. Same bookkeeping
-        // as the partition's root -- extent along world +Z in the instance frame.
-        CutSegmentDescriptor root;
-        root.index       = 0;
-        root.build_z_min = std::numeric_limits<double>::max();
-        root.build_z_max = std::numeric_limits<double>::lowest();
-        HorizontalExtent root_extent;
-        for (const stl_vertex &v : merged.vertices) {
-            const Vec3d p = instance_transform * v.cast<double>();
-            root.build_z_min = std::min(root.build_z_min, p.z());
-            root.build_z_max = std::max(root.build_z_max, p.z());
-            root_extent.add(p);
-        }
-        root.build_reach_max = root_extent.reach();
+        CutSegmentDescriptor root = root_segment(merged, instance_transform, root_build_normal_world);
         if (out_meshes)
             out_meshes->assign(1, merged);
         segments.push_back(std::move(root));
@@ -250,6 +283,8 @@ void append_part_segments(const ModelObject &mo, const indexed_triangle_set &mer
         HorizontalExtent seg_extent;
         for (const stl_vertex &v : its.vertices) {
             const Vec3d p = instance_transform * v.cast<double>();
+            if (!p.allFinite())
+                throw std::invalid_argument("Nonfinite directed-part geometry");
             const double h = n_world.dot(p);
             seg.build_z_min = std::min(seg.build_z_min, h);
             seg.build_z_max = std::max(seg.build_z_max, h);
@@ -283,25 +318,73 @@ std::vector<CutSegmentDescriptor> derive_cut_segments(
     if (out_meshes)
         out_meshes->clear();
     const bool directed = object_has_directed_parts(mo);
-    if (! mo.cut_planes.active() && ! directed) {
+    const bool object_direction = object_has_build_direction(mo);
+    if (! mo.cut_planes.active() && ! directed && !object_direction) {
         if (status)
             *status = CutSegmentationStatus::StackInactive;
         return {};
     }
+    Vec3d root_normal = root_build_normal_world;
+    if (!std::isfinite(min_segment_thickness) || min_segment_thickness < 0. || !instance_transform.matrix().allFinite() ||
+        !std::isfinite(instance_transform.linear().determinant()) ||
+        std::abs(instance_transform.linear().determinant()) < 1e-12 ||
+        !root_normal.allFinite() || !std::isfinite(root_normal.norm()) || root_normal.norm() < EPSILON) {
+        if (status)
+            *status = CutSegmentationStatus::InvalidGeometry;
+        return {};
+    }
+    if (object_direction) {
+        const double b = mo.config.has("layer_rotation_b") ? mo.config.opt_float("layer_rotation_b") : 0.;
+        const double c = mo.config.has("layer_rotation_c") ? mo.config.opt_float("layer_rotation_c") : 0.;
+        if (!std::isfinite(b) || !std::isfinite(c)) {
+            if (status)
+                *status = CutSegmentationStatus::InvalidGeometry;
+            return {};
+        }
+        root_normal = Geometry::build_normal_from_bc(b, c);
+    }
+    root_normal.normalize();
     // Directed parts never take part in the plane partition: they are their own segments.
     const indexed_triangle_set merged = merged_model_part_mesh(mo, /*exclude_directed_parts*/ true);
     std::vector<CutSegmentDescriptor> segments;
-    if (mo.cut_planes.active())
+    CutSegmentationStatus derived_status = CutSegmentationStatus::StackInactive;
+    if (mo.cut_planes.active()) {
         segments = derive_cut_segments(merged, mo.cut_planes.planes, instance_transform,
-                                       min_segment_thickness, mo.cut_planes.user_ordered, status, out_meshes, mo.name,
-                                       root_build_normal_world);
-    else if (status)
-        *status = CutSegmentationStatus::StackInactive;
-    if (directed) {
-        append_part_segments(mo, merged, instance_transform, segments, out_meshes);
-        if (status && ! segments.empty() && *status == CutSegmentationStatus::StackInactive)
-            *status = CutSegmentationStatus::Ok;
+                                       min_segment_thickness, mo.cut_planes.user_ordered, &derived_status, out_meshes, mo.name,
+                                       root_normal);
+        if (segments.empty() && derived_status != CutSegmentationStatus::NoSplit &&
+            derived_status != CutSegmentationStatus::StackInactive &&
+            !(derived_status == CutSegmentationStatus::NoGeometry && directed && merged.indices.empty())) {
+            if (status)
+                *status = derived_status;
+            return {};
+        }
     }
+    try {
+        if (object_direction && segments.empty() && !merged.indices.empty()) {
+            segments.push_back(root_segment(merged, instance_transform, root_normal));
+            if (out_meshes)
+                out_meshes->assign(1, merged);
+        }
+        if (directed)
+            append_part_segments(mo, merged, instance_transform, segments, out_meshes, root_normal);
+    } catch (const std::invalid_argument &) {
+        if (status)
+            *status = CutSegmentationStatus::InvalidGeometry;
+        if (out_meshes)
+            out_meshes->clear();
+        return {};
+    }
+    for (const CutSegmentDescriptor &segment : segments)
+        if (segment.build_z_max - segment.build_z_min < min_segment_thickness) {
+            if (status)
+                *status = CutSegmentationStatus::SegmentTooThin;
+            if (out_meshes)
+                out_meshes->clear();
+            return {};
+        }
+    if (status)
+        *status = segments.empty() ? derived_status : CutSegmentationStatus::Ok;
     return segments;
 }
 
