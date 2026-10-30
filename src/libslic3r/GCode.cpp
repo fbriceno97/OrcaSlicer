@@ -2930,6 +2930,13 @@ void GCode::do_export(Print* print, const char* path, GCodeProcessorResult* resu
     m_processor.result().nozzle_group_result = m_print->get_layered_nozzle_group_result();
 
     m_processor.finalize(true);
+    try {
+        print->validate_nonplanar_gcode(m_processor.get_result());
+    } catch (...) {
+        // Never leave rejected non-planar output available for sending or printing.
+        boost::nowide::remove(path_tmp.c_str());
+        throw;
+    }
 //    DoExport::update_print_estimated_times_stats(m_processor, print->m_print_statistics);
     DoExport::update_print_estimated_stats(m_processor, m_writer.extruders(), print->m_print_statistics, print->config());
     // Printed-mass safety check. Flushed filament leaves the bed, so subtract it

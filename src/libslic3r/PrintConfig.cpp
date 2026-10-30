@@ -1903,9 +1903,9 @@ void PrintConfigDef::init_fff_params()
     def->set_default_value(new ConfigOptionBool(false));
 
     def = this->add("nonplanar_hotend_cone_height", coFloat);
-    def->label = L("Hotend envelope height");
+    def->label = L("Hotend envelope radius");
     def->category = L("Non-planar printing");
-    def->tooltip = L("Height of the modeled hotend envelope above the nozzle tip. The generic default is not a measured clearance for your printer. Zero disables the hotend model.");
+    def->tooltip = L("Radius of the sphere bounding the hotend envelope around the nozzle tip. The generic default is not a measured clearance for your printer. Zero disables the hotend model and prevents non-planar G-code export.");
     def->sidetext = L("mm");
     def->min = 0.;
     def->mode = comExpert;

@@ -37,6 +37,7 @@
 #include <chrono>
 #include <optional>
 #include "GCode/GCodeProcessor.hpp"
+#include "GCode/HotendCollisionCheck.hpp"
 #include "GCode/ThumbnailData.hpp"
 #include "ExtrusionEntity.hpp"
 #include <math.h>
@@ -3887,6 +3888,27 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
 // The export_gcode may die for various reasons (fails to process filename_format,
 // write error into the G-code, cannot execute post-processing scripts).
 // It is up to the caller to show an error message.
+void Print::validate_nonplanar_gcode(const GCodeProcessorResult &result) const
+{
+    if (!m_config.enable_nonplanar.value)
+        return;
+    if (!result.nonplanar_metadata_valid)
+        throw SlicingError(_u8L("Non-planar G-code contains invalid section or build-direction metadata."));
+    const bool has_sections = std::any_of(result.moves.begin(), result.moves.end(), [](const auto &move) {
+        return move.cut_segment_id >= 0;
+    });
+    if (!has_sections && result.tool_axes.size() <= 1)
+        return;
+    HotendCollisionParams params;
+    params.envelope = HotendEnvelope::from_config(m_config);
+    if (!params.envelope.enabled())
+        throw SlicingError(_u8L("Non-planar G-code requires an enabled hotend envelope for collision checks."));
+    // Supported Bambu and other three-axis machines keep the nozzle upright.
+    // A clear result covers this modeled envelope, not physical printer validation.
+    if (const auto collision = check_hotend_collisions(result, params))
+        throw SlicingError(collision->message);
+}
+
 std::string Print::export_gcode(const std::string& path_template, GCodeProcessorResult* result, ThumbnailsGeneratorCallback thumbnail_cb)
 {
     if (unsupported_nonplanar_object(*this) != nullptr)
@@ -5585,6 +5607,7 @@ void Print::export_gcode_from_previous_file(const std::string& file, GCodeProces
             processor.initialize_from_context(result->nozzle_group_result);
         //processor.enable_producers(true);
         processor.process_file(file);
+        validate_nonplanar_gcode(processor.get_result());
 
         // filament seq is loaded from file, processor result will override the value
         auto filament_seq_loaded = result->filament_change_sequence;
@@ -5641,9 +5664,12 @@ void Print::reload_gcode_moves(GCodeProcessorResult* result) const
     }
 
     GCodeProcessorResult& reloaded = processor.result();
+    validate_nonplanar_gcode(reloaded);
     std::lock_guard<std::mutex> lock(result->result_mutex);
     result->moves      = std::move(reloaded.moves);
     result->lines_ends = std::move(reloaded.lines_ends);
+    result->tool_axes = std::move(reloaded.tool_axes);
+    result->nonplanar_metadata_valid = reloaded.nonplanar_metadata_valid;
 }
 
 std::tuple<float, float> Print::object_skirt_offset(double margin_height) const

@@ -3,6 +3,14 @@
 #include "libslic3r/GCode/HotendCollisionCheck.hpp"
 #include "libslic3r/GCode/GCodeProcessor.hpp"
 #include "libslic3r/Point.hpp"
+#include "libslic3r/Print.hpp"
+#include "libslic3r/Model.hpp"
+#include "libslic3r/PrintConfig.hpp"
+#include "libslic3r/Exception.hpp"
+#include "test_helpers.hpp"
+#include "test_utils.hpp"
+
+#include <boost/filesystem/operations.hpp>
 
 #include <limits>
 #include <stdexcept>
@@ -70,4 +78,45 @@ TEST_CASE("An oversized collision grid fails instead of silently approving clear
     sample_sections(result, false, false);
     result.moves.back().position = Vec3f(8000.f, 8000.f, 0.f);
     CHECK_THROWS_AS(check_hotend_collisions(result, HotendCollisionParams{}), std::runtime_error);
+}
+
+TEST_CASE("The export gate rejects colliding sections and disabled envelopes while preserving default-off behavior", "[HotendCollision][Print]")
+{
+    Print print;
+    Model model;
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}});
+    print.apply(model, config);
+    GCodeProcessorResult result;
+    sample_sections(result, false, false);
+    CHECK_THROWS_AS(print.validate_nonplanar_gcode(result), SlicingError);
+
+    result.reset();
+    sample_sections(result, true, false);
+    CHECK_NOTHROW(print.validate_nonplanar_gcode(result));
+    config.set_deserialize_strict({{"nonplanar_hotend_cone_height", "0"}});
+    print.apply(model, config);
+    CHECK_THROWS_AS(print.validate_nonplanar_gcode(result), SlicingError);
+
+    config.set_deserialize_strict({{"enable_nonplanar", "0"}});
+    print.apply(model, config);
+    CHECK_NOTHROW(print.validate_nonplanar_gcode(result));
+}
+
+TEST_CASE("Rejected non-planar exports leave neither printable output nor a temporary file", "[HotendCollision][Print]")
+{
+    const bool preview_requested = GENERATE(false, true);
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"},
+        {"machine_end_gcode", "; SEGMENT_ID:invalid"}});
+    Print print;
+    Model model;
+    Slic3r::Test::init_print({Slic3r::Test::cube(8.)}, print, model, config);
+    print.set_status_silent();
+    print.process();
+    ScopedTemporaryFile output(".gcode");
+    GCodeProcessorResult preview;
+    CHECK_THROWS_AS(print.export_gcode(output.string(), preview_requested ? &preview : nullptr), SlicingError);
+    CHECK_FALSE(boost::filesystem::exists(output.string()));
+    CHECK_FALSE(boost::filesystem::exists(output.string() + ".tmp"));
 }
