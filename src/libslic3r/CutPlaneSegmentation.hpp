@@ -93,7 +93,8 @@ struct CutSegmentDescriptor
 
     // Half-space clips confining this segment (only planes that actually split the mesh contribute).
     std::vector<CutSegmentClip> clips;
-    // Object-local build direction (unit). Ignored for the root segment, which always builds +Z.
+    // Object-local build direction (unit). The root follows the configured object/machine
+    // direction; plane and part sections carry their independent directions.
     Vec3d build_normal { Vec3d::UnitZ() };
 
     // Exact extent of this segment's materialized clipped piece, projected on the build axis in the
@@ -142,9 +143,8 @@ struct CutSegmentDescriptor
 
     bool is_root() const { return parent < 0 && ! part_volume.valid(); }
 
-    // BELT_MOD -- whether the root builds along world +Z (a flat bed). On a belt it builds along the
-    // tilted gantry normal, measured from the instance origin, so its build_z_min is NOT a height
-    // above the belt: about half of any object projects negative without being sunk at all.
+    // Whether the root builds along world +Z. A whole-object direction or belt gantry can tilt
+    // it; its projected build_z_min then is not a height above the physical bed.
     // Meaningful for the root only; true by default so a hand-built descriptor keeps the flat-bed rule.
     bool root_builds_up { true };
 

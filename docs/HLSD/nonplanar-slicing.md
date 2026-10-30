@@ -11,6 +11,10 @@ Directed model parts are excluded from this partition and receive independent
 section descriptors. Negative volumes and parameter modifiers remain available
 to every section.
 
+A whole-object build direction selects the root's world-space build normal. When
+there is no splitting plane, the object receives one root descriptor. Invalid
+planes reject derivation rather than silently falling back to directed parts.
+
 `Print::apply` derives descriptors for each distinct instance transform. Section
 identity includes the model object, instance identity, transform, and section
 index. Copies with identical transforms remain separate when they carry sections;
