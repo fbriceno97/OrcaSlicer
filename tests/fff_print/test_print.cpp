@@ -48,6 +48,7 @@
 
 #include "test_helpers.hpp"
 #include "test_utils.hpp"
+#include "libslic3r/CutPlanes.hpp"
 
 #include <algorithm>
 #include <boost/algorithm/string/predicate.hpp>
@@ -68,6 +69,38 @@
 
 using namespace Slic3r;
 using namespace Slic3r::Test;
+
+TEST_CASE("Editing cut planes invalidates cached slicing and blocks unsupported planar fallback", "[Print][CutPlaneSegmentation]")
+{
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"layer_change_gcode", "G92 E0"}});
+    Print print;
+    Model model;
+    init_print({cube(20.)}, print, model, config);
+    print.process();
+    REQUIRE(print.is_step_done(posSlice));
+
+    CutPlaneStack &stack = model.objects.front()->cut_planes;
+    stack.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(10., 10., 10.);
+    stack.planes.push_back(plane);
+    print.apply(model, config);
+    CHECK_FALSE(print.is_step_done(posSlice));
+    REQUIRE(print.model().objects.size() == 1);
+    CHECK(print.model().objects.front()->cut_planes == stack);
+    const StringObjectException error = print.validate();
+    CHECK_FALSE(error.string.empty());
+    CHECK(error.object == print.model().objects.front());
+    CHECK_THROWS_AS(print.process(), Slic3r::SlicingError);
+    ScopedTemporaryFile output(".gcode");
+    CHECK_THROWS_AS(print.export_gcode(output.string(), nullptr), Slic3r::SlicingError);
+
+    stack.enabled = false;
+    print.apply(model, config);
+    CHECK_NOTHROW(print.process());
+    CHECK(print.is_step_done(posSlice));
+}
 
 TEST_CASE("Timelapse g-code is emitted once per layer for Bambu and non-Bambu printers", "[Print][Regression]")
 {

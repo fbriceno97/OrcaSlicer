@@ -80,6 +80,8 @@
 #include "PrintConfig.hpp"
 #include "MaterialType.hpp"
 #include "Model.hpp"
+#include "CutPlanes.hpp"
+#include <initializer_list>
 #include "format.hpp"
 #include "LocalesUtils.hpp"
 #include <float.h>
@@ -118,6 +120,40 @@ using namespace nlohmann;
 #define L(s) Slic3r::I18N::translate(s)
 
 namespace Slic3r {
+
+// Authored sections must never silently fall back to ordinary planar output.
+// Remove this capability guard only when segment slicing, export, preview and
+// collision enforcement are connected and validated together.
+static const ModelObject *unsupported_nonplanar_object(const Print &print)
+{
+    const auto requests_direction = [](const ModelConfig &config) {
+        for (const char *key : {"layer_rotation_b", "layer_rotation_c"})
+            if (config.has(key)) {
+                const double value = config.opt_float(key);
+                if (!std::isfinite(value) || std::abs(value) > EPSILON)
+                    return true;
+            }
+        return false;
+    };
+    for (const PrintObject *print_object : print.objects()) {
+        const ModelObject *object = print_object->model_object();
+        if (object->cut_planes.active())
+            for (const CutPlane &plane : object->cut_planes.planes)
+                if (plane.enabled)
+                    return object;
+        if (requests_direction(object->config))
+            return object;
+        for (const ModelVolume *volume : object->volumes)
+            if (volume->is_model_part() && requests_direction(volume->config))
+                return object;
+    }
+    return nullptr;
+}
+
+static std::string unsupported_nonplanar_message()
+{
+    return L("Active cut planes or build directions are not supported by this experimental build yet. Disable them to slice normally.");
+}
 
 Print::SlicingPipelineHookFn Print::s_slicing_pipeline_hook_fn = nullptr;
 
@@ -1859,6 +1895,8 @@ std::string Print::slicing_errors_message(const SlicingErrors &errors) const
 
 StringObjectException Print::validate(std::vector<StringObjectException> *warnings, Polygons* collison_polygons, std::vector<std::pair<Polygon, float>>* height_polygons) const
 {
+    if (const ModelObject *object = unsupported_nonplanar_object(*this))
+        return {unsupported_nonplanar_message(), object};
     auto add_warning = [warnings](StringObjectException w) {
         w.is_warning = true;
         if (warnings != nullptr)
@@ -3134,6 +3172,8 @@ std::map<ObjectID, unsigned int> getObjectExtruderMap(const Print& print) {
 // Slicing process, running at a background thread.
 void Print::process(long long *time_cost_with_cache, bool use_cache)
 {
+    if (unsupported_nonplanar_object(*this) != nullptr)
+        throw Slic3r::SlicingError(unsupported_nonplanar_message());
     long long start_time = 0, end_time = 0;
     if (time_cost_with_cache)
         *time_cost_with_cache = 0;
@@ -3846,6 +3886,8 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
 // It is up to the caller to show an error message.
 std::string Print::export_gcode(const std::string& path_template, GCodeProcessorResult* result, ThumbnailsGeneratorCallback thumbnail_cb)
 {
+    if (unsupported_nonplanar_object(*this) != nullptr)
+        throw Slic3r::SlicingError(unsupported_nonplanar_message());
     // output everything to a G-code file
     // The following call may die if the filename_format template substitution fails.
     std::string path = this->output_filepath(path_template);
