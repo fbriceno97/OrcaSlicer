@@ -140,6 +140,8 @@ static const ModelObject *unsupported_nonplanar_object(const Print &print)
     };
     for (const PrintObject *print_object : print.objects()) {
         const ModelObject *object = print_object->model_object();
+        if (print_object->segment().has_value())
+            return object;
         if (object->cut_planes.active())
             for (const CutPlane &plane : object->cut_planes.planes)
                 if (plane.enabled)

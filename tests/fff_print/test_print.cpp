@@ -218,6 +218,7 @@ TEST_CASE("Section slices stay inside their model-space cut bounds", "[Print][Cu
 
 TEST_CASE("Directed parts retain modifier bindings without slicing another section's material", "[Print][CutPlaneSegmentation]")
 {
+    const double direction_angle = GENERATE(0., 20.);
     DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
     config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"layer_height", "0.2"},
         {"initial_layer_print_height", "0.2"}});
@@ -228,7 +229,7 @@ TEST_CASE("Directed parts retain modifier bindings without slicing another secti
     TriangleMesh part = cube(10.);
     part.translate(30.f, 0.f, 0.f);
     ModelVolume *directed = object->add_volume(std::move(part));
-    directed->config.set_key_value("layer_rotation_b", new ConfigOptionFloat(20.));
+    directed->config.set_key_value("layer_rotation_b", new ConfigOptionFloat(direction_angle));
     TriangleMesh hole = make_cube(5., 5., 22.);
     hole.translate(5.f, 5.f, -1.f);
     object->add_volume(std::move(hole))->set_type(ModelVolumeType::NEGATIVE_VOLUME);
@@ -258,6 +259,7 @@ TEST_CASE("Directed parts retain modifier bindings without slicing another secti
         CHECK(checked_vertices > 0);
         CHECK(has_hole == !owns_directed_part);
     }
+    CHECK_THROWS_AS(print.process(), SlicingError);
 }
 
 TEST_CASE("Timelapse g-code is emitted once per layer for Bambu and non-Bambu printers", "[Print][Regression]")
