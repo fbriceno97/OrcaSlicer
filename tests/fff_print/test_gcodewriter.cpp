@@ -78,8 +78,12 @@ TEST_CASE("Section motion leaves physical calibration outside the build-frame ro
             emitted = Vec3d(line.new_X(state), line.new_Y(state), line.new_Z(state));
     });
     CHECK_THAT((emitted - expected).norm(), Catch::Matchers::WithinAbs(0., 0.002));
+    CHECK_THAT((writer.position_for_custom_gcode() - Vec3d(100., 200., 0.) - expected).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    const Vec3d after_macro(120., 230., 80.);
+    writer.set_position_from_custom_gcode(after_macro);
+    CHECK_THAT((writer.position_for_custom_gcode() - after_macro).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
     writer.set_section_transform(std::nullopt);
-    CHECK_THAT((writer.get_position() - Vec3d(100., 200., 0.) - expected).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    CHECK_THAT((writer.get_position() - after_macro).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
 }
 
 TEST_CASE("Tilted arcs emit linear XYZ moves without changing their extrusion amount", "[GCodeWriter][Nonplanar]")

@@ -122,6 +122,10 @@ public:
     const Vec3d& get_position() const { return m_pos; }
     Vec3d&       get_position() { return m_pos; }
     void        set_position(const Vec3d& in) { m_pos = in; }
+    // Position contract for custom machine G-code, preserving the historical
+    // plate-offset convention while a generated-motion section map is active.
+    Vec3d       position_for_custom_gcode() const;
+    void        set_position_from_custom_gcode(const Vec3d &position);
     double      get_zhop() const { return m_lifted; }
 
     //BBS: set offset for gcode writer
