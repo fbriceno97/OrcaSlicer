@@ -488,15 +488,26 @@ jobs:
           }
           $testExit = 0
           foreach ($suite in @('fff_print', 'libslic3r')) {
-            $executables = @(Get-ChildItem "$env:BUILD_DIR/tests" -Recurse -Filter "${suite}_tests.exe")
-            if ($executables.Count -ne 1) { throw "Expected one $suite executable, found $($executables.Count)." }
             $report = Join-Path $env:RUNNER_TEMP "orca-$suite-features.xml"
-            & $executables[0].FullName '[CutPlaneSegmentation],[cutplanes],[HotendCollision],[HotendEnvelope],[WaveOverhangs],[Nonplanar],[PreciseSeam3mf]' --order rand --reporter junit --out $report
+            $testLog = Join-Path $env:RUNNER_TEMP "orca-$suite-features.log"
+            ctest --test-dir "$env:BUILD_DIR/tests/$suite" -C Release -L '^(CutPlaneSegmentation|cutplanes|HotendCollision|HotendEnvelope|WaveOverhangs|Nonplanar|PreciseSeam3mf)$' --schedule-random --no-tests=error --timeout 180 --output-on-failure --output-junit $report 2>&1 | Tee-Object -FilePath $testLog
             $suiteExit = $LASTEXITCODE
+            Write-Host "$suite feature test exit code: $suiteExit"
             python scripts/report_ctest_failures.py $report
             if ($suiteExit -ne 0) { $testExit = $suiteExit }
           }
           exit $testExit
+
+      - name: Preserve experimental regression reports
+        if: always() && runner.os == 'Windows' && github.repository == 'fbriceno97/OrcaSlicer' && (github.head_ref == 'feature/unlayered-wave-nonplanar' || github.ref_name == 'feature/unlayered-wave-nonplanar')
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-feature-regression-reports
+          path: |
+            ${{ runner.temp }}/orca-*-features.xml
+            ${{ runner.temp }}/orca-*-features.log
+          if-no-files-found: ignore
+          retention-days: 5
 
       - name: Build slicer Win
         if: runner.os == 'Windows'

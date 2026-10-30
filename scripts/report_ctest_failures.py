@@ -15,7 +15,13 @@ def main():
     if not report.is_file():
         print("No JUnit report was produced; inspect the test setup or runner failure.")
         return
-    cases = list(ET.parse(report).getroot().iter("testcase"))
+    try:
+        cases = list(ET.parse(report).getroot().iter("testcase"))
+    except ET.ParseError as error:
+        details = report.read_text(encoding="utf-8", errors="replace")[-5000:]
+        message = f"{report.name}: incomplete test report ({error}). The test process may have terminated.\n{details}"
+        print("::error title=Incomplete test report::" + escape_annotation(message))
+        return
     failed = []
     skipped = 0
     for case in cases:

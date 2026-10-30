@@ -131,7 +131,7 @@ TEST_CASE("The export gate rejects colliding sections and disabled envelopes whi
     Model model;
     DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
     config.set_deserialize_strict({{"enable_nonplanar", "1"}});
-    print.apply(model, config);
+    Slic3r::Test::init_print({Slic3r::Test::cube(8.)}, print, model, config);
     GCodeProcessorResult result;
     sample_sections(result, false, false);
     CHECK_THROWS_AS(print.validate_nonplanar_gcode(result), SlicingError);
@@ -172,7 +172,7 @@ TEST_CASE("Edited G-code must remain readable and retain valid section metadata"
     Model model;
     DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
     config.set_deserialize_strict({{"enable_nonplanar", "1"}});
-    print.apply(model, config);
+    Slic3r::Test::init_print({Slic3r::Test::cube(8.)}, print, model, config);
     ScopedTemporaryFile edited(".gcode");
     {
         std::ofstream out(edited.string());
