@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "libslic3r/CutPlaneSegmentation.hpp"
@@ -8,8 +9,13 @@
 #include "libslic3r/TriangleMesh.hpp"
 #include "libslic3r/Point.hpp"
 #include "libslic3r/PrintConfig.hpp"
+#include "libslic3r/Polygon.hpp"
+#include "libslic3r/ExPolygon.hpp"
+#include "libslic3r/libslic3r.h"
+#include <Eigen/Geometry>
 
 #include <cmath>
+#include <cstddef>
 #include <initializer_list>
 #include <limits>
 #include <stdexcept>
@@ -187,7 +193,7 @@ TEST_CASE("A 3x3x3 grid of planes peels into seven chunks conserving volume", "[
     Model model;
     ModelObject *mo = make_object(model, { make_cube(20., 20., 20.) });
     mo->cut_planes.enabled = true;
-    for (const Vec3d &normal : { Vec3d::UnitX(), Vec3d::UnitY(), Vec3d::UnitZ() })
+    for (const Vec3d normal : { Vec3d::UnitX(), Vec3d::UnitY(), Vec3d::UnitZ() })
         for (double offset : { 5., 15. })
             mo->cut_planes.planes.push_back(plane_at(normal * offset, normal));
 
@@ -215,7 +221,7 @@ TEST_CASE("Bed-side normalization is derived per instance transform", "[cutplane
 
     const auto upright = derive_cut_segments(*mo, Transform3d::Identity());
     Transform3d upside_down = Transform3d::Identity();
-    upside_down.rotate(Eigen::AngleAxisd(M_PI, Vec3d::UnitX()));
+    upside_down.rotate(Eigen::AngleAxisd(PI, Vec3d::UnitX()));
     const auto inverted = derive_cut_segments(*mo, upside_down);
 
     REQUIRE(upright.size() == 2);

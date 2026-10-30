@@ -1,7 +1,9 @@
 // Windows x64 prototype acceptance test for the first Unlayered wave-engine port.
 // Intentionally excludes Unlayered's unported floor, temperature, and nonplanar options.
 // AGPL-3.0-or-later attribution is preserved in WaveOverhangs source files.
-#include <catch2/catch_all.hpp>
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
+#include <cstddef>
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -10,6 +12,8 @@
 #include "libslic3r/GCodeReader.hpp"
 #include "libslic3r/Layer.hpp"
 #include "libslic3r/Print.hpp"
+#include "libslic3r/PrintConfig.hpp"
+#include "libslic3r/Config.hpp"
 #include "libslic3r/TriangleMesh.hpp"
 #include "test_helpers.hpp"
 using namespace Slic3r;

@@ -491,7 +491,7 @@ jobs:
             $executables = @(Get-ChildItem "$env:BUILD_DIR/tests" -Recurse -Filter "${suite}_tests.exe")
             if ($executables.Count -ne 1) { throw "Expected one $suite executable, found $($executables.Count)." }
             $report = Join-Path $env:RUNNER_TEMP "orca-$suite-features.xml"
-            & $executables[0].FullName '[CutPlaneSegmentation],[HotendCollision],[WaveOverhangs],[Nonplanar]' --order rand --reporter junit --out $report
+            & $executables[0].FullName '[CutPlaneSegmentation],[cutplanes],[HotendCollision],[HotendEnvelope],[WaveOverhangs],[Nonplanar],[PreciseSeam3mf]' --order rand --reporter junit --out $report
             $suiteExit = $LASTEXITCODE
             python scripts/report_ctest_failures.py $report
             if ($suiteExit -ne 0) { $testExit = $suiteExit }
