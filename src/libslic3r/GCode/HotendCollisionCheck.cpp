@@ -2,6 +2,13 @@
 
 #include "../libslic3r.h"
 #include "../I18N.hpp"
+#include "../Point.hpp"
+#include "../PrintConfig.hpp"
+#include "../HotendEnvelope.hpp"
+#include "GCodeProcessor.hpp"
+#include "TrunnionAC.hpp"
+#include <Eigen/Core>
+#include <Eigen/Geometry>
 
 #include <boost/format.hpp>
 #include <boost/log/trivial.hpp>
@@ -10,6 +17,12 @@
 #include <climits>
 #include <cmath>
 #include <cstdint>
+#include <cstddef>
+#include <limits>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <utility>
 #include <unordered_set>
 #include <vector>
 
@@ -37,6 +50,8 @@ void sample_segment(const Vec3d &a, const Vec3d &b, double step, unsigned int gc
 {
     const Vec3d  d   = b - a;
     const double len = d.norm();
+    if (!std::isfinite(len) || len / step > 1'000'000.)
+        throw std::invalid_argument("G-code move exceeds hotend collision sampling limits");
     const int    n   = std::max(2, int(len / step) + 1);
     for (int i = 0; i < n; ++ i)
         out.push_back({a + d * (double(i) / double(n - 1)), gcode_id});
@@ -92,22 +107,39 @@ struct Reach
 std::optional<ConflictResult> check_hotend_collisions(const GCodeProcessorResult &result, const HotendCollisionParams &params)
 {
     const HotendEnvelope &env = params.envelope;
+    if (!result.nonplanar_metadata_valid || result.tool_axes.empty())
+        throw std::invalid_argument("Invalid non-planar G-code metadata");
+    if (!std::isfinite(params.margin) || params.margin < 0. || !std::isfinite(params.eps) || params.eps < 0.)
+        throw std::invalid_argument("Invalid hotend collision tolerance");
     if (! env.enabled())
         return std::nullopt;
-    if (result.tool_axes.size() <= 1 || result.moves.size() < 2)
-        return std::nullopt;   // planar print: nothing above the tip can have been printed yet
+    if (params.eps >= env.height)
+        throw std::invalid_argument("Hotend collision tolerance must be below the envelope height");
+    const double coordinate_limit = double(INT32_MAX) / 20.;
+    if (env.height > coordinate_limit || params.margin > coordinate_limit)
+        throw std::invalid_argument("Hotend model exceeds collision coordinate limits");
+    const bool has_sections = std::any_of(result.moves.begin(), result.moves.end(), [](const auto &move) {
+        return move.cut_segment_id >= 0;
+    });
+    if ((result.tool_axes.size() <= 1 && !has_sections) || result.moves.size() < 2)
+        return std::nullopt;
 
     // --- split the move stream into tool-axis episodes and sample tips / material ---
     std::vector<Episode> episodes;
     auto axis_of = [&result](const GCodeProcessorResult::MoveVertex &m) -> Vec3d {
-        const size_t id = m.tool_axis_id < result.tool_axes.size() ? m.tool_axis_id : 0;
-        return result.tool_axes[id].cast<double>();
+        if (m.tool_axis_id >= result.tool_axes.size())
+            throw std::invalid_argument("Tool-axis index is outside its palette");
+        const Vec3d axis = result.tool_axes[m.tool_axis_id].cast<double>();
+        if (!axis.allFinite() || axis.norm() < 1e-6)
+            throw std::invalid_argument("Invalid tool axis in collision data");
+        return axis.normalized();
     };
     for (size_t i = 1; i < result.moves.size(); ++ i) {
         const auto &prev = result.moves[i - 1];
         const auto &m    = result.moves[i];
         const Vec3d axis = axis_of(m);
-        if (episodes.empty() || (axis - episodes.back().axis).norm() > 1e-6) {
+        if (episodes.empty() || (axis - episodes.back().axis).norm() > 1e-6 ||
+            m.cut_segment_id != episodes.back().segment || m.object_label_id != episodes.back().object_label) {
             Episode e;
             e.axis = axis; e.first_gcode_id = m.gcode_id; e.object_label = m.object_label_id; e.segment = m.cut_segment_id;
             episodes.push_back(std::move(e));
@@ -117,6 +149,10 @@ std::optional<ConflictResult> check_hotend_collisions(const GCodeProcessorResult
             continue;
         const Vec3d a = prev.position.cast<double>();
         const Vec3d b = m.position.cast<double>();
+        if (!a.allFinite() || !b.allFinite())
+            throw std::invalid_argument("Nonfinite G-code position in collision data");
+        if (a.cwiseAbs().maxCoeff() > coordinate_limit || b.cwiseAbs().maxCoeff() > coordinate_limit)
+            throw std::invalid_argument("G-code position exceeds hotend collision coordinate limits");
         if ((b - a).norm() < 1e-9)
             continue;
         sample_segment(a, b, 1.0, m.gcode_id, e.tips);
@@ -177,7 +213,7 @@ std::optional<ConflictResult> check_hotend_collisions(const GCodeProcessorResult
             const int u0 = int(std::floor(umin)) - 1, v0 = int(std::floor(vmin)) - 1;
             const int nu = int(std::ceil(umax)) - u0 + 2, nv = int(std::ceil(vmax)) - v0 + 2;
             if (nu <= 0 || nv <= 0 || size_t(nu) * size_t(nv) > 40'000'000)
-                continue; // absurd extents: do not blow memory, skip silently (logged below)
+                throw std::runtime_error("Hotend collision check exceeds supported spatial extent");
 
             // tips binned by height band
             std::vector<int> tip_band(T.size());

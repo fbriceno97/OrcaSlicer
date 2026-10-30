@@ -277,6 +277,10 @@ set(lisbslic3r_sources
     GCode/FanMover.hpp
     GCode/GCodeProcessor.cpp
     GCode/GCodeProcessor.hpp
+    GCode/HotendCollisionCheck.cpp
+    GCode/HotendCollisionCheck.hpp
+    GCode/TrunnionAC.cpp
+    GCode/TrunnionAC.hpp
     GCode/GCodeStatistics.cpp
     GCode/GCodeStatistics.hpp
     GCode/ElegooGCodeProcessorHelper.cpp
@@ -613,6 +617,12 @@ if (APPLE)
             Format/ModelIO.mm
         )
 endif ()
+
+# Only the existing standalone kinematics math is needed by the collision check.
+# The printer-config adapter and rotary G-code export are not enabled here.
+set_source_files_properties(GCode/TrunnionAC.cpp PROPERTIES
+    COMPILE_DEFINITIONS TRUNNION_AC_STANDALONE
+    SKIP_PRECOMPILE_HEADERS ON)
 
 add_library(libslic3r STATIC ${lisbslic3r_sources}
     "${CMAKE_CURRENT_BINARY_DIR}/libslic3r_version.h"

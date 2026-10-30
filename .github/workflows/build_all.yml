@@ -102,7 +102,10 @@ jobs:
             @{ Label = 'Wave perimeter integration'; File = 'src/libslic3r/PerimeterGenerator.cpp'; Pattern = 'WaveOverhangs' },
             @{ Label = 'Cut-plane segmentation core'; File = 'src/libslic3r/CMakeLists.txt'; Pattern = 'CutPlaneSegmentation\.cpp' },
             @{ Label = 'Cut-plane GUI compiled'; File = 'src/slic3r/CMakeLists.txt'; Pattern = 'GLGizmoCutPlanes\.cpp' },
-            @{ Label = 'Collision check compiled'; File = 'src/libslic3r/CMakeLists.txt'; Pattern = 'HotendCollisionCheck\.cpp' }
+            @{ Label = 'Collision check compiled'; File = 'src/libslic3r/CMakeLists.txt'; Pattern = 'HotendCollisionCheck\.cpp' },
+            @{ Label = 'Cut-plane slicing orchestration'; File = 'src/libslic3r/PrintApply.cpp'; Pattern = 'derive_cut_segments\(' },
+            @{ Label = 'Section G-code emission'; File = 'src/libslic3r/GCode.cpp'; Pattern = 'SEGMENT_ID|ETags::Segment_Id' },
+            @{ Label = 'Collision enforcement at export'; File = 'src/libslic3r/Print.cpp'; Pattern = 'check_hotend_collisions\(' }
           )
           $missing = 0
           foreach ($c in $checks) {

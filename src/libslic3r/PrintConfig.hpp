@@ -49,6 +49,9 @@ namespace Slic3r {
 
 class DynamicPrintConfig;
 
+// Rows are the toolhead's +X, +Y and nozzle axis in the bed frame.
+Matrix3d tool_head_frame(const Vec3d &tool_axis);
+
 enum GCodeFlavor : unsigned char {
     gcfMarlinLegacy, 
     gcfKlipper, 

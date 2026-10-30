@@ -29,7 +29,7 @@ namespace Slic3r {
 struct HotendCollisionParams
 {
     HotendEnvelope envelope;          // height <= 0 disables the check
-    bool           upright = false;   // virtual 5-axis: the nozzle stays vertical
+    bool           upright = true;    // ordinary three-axis nozzle stays vertical
     // A/C table-table machine: the head never tilts, the table does, so the head's faces in the bed
     // frame come from the (A, C) the exporter picks for each episode (TrunnionAC::solve_sequence),
     // not from tool_head_frame()'s B/C model.

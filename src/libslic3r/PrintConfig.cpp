@@ -7,6 +7,8 @@
 #include "ClipperUtils.hpp"
 #include "Config.hpp"
 #include "HotendEnvelope.hpp"
+#include <Eigen/Geometry>
+#include <stdexcept>
 #include "Geometry.hpp"
 #include "FilamentMixer.hpp"
 #include "MaterialType.hpp"
@@ -82,6 +84,26 @@ void ReplaceString(std::string &resource_str, const std::string &old_str, const 
 }
 
 namespace Slic3r {
+
+Matrix3d tool_head_frame(const Vec3d &tool_axis)
+{
+    if (!tool_axis.allFinite() || tool_axis.cwiseAbs().maxCoeff() == 0.)
+        throw std::invalid_argument("Tool axis must be finite and nonzero");
+    const Vec3d n = (tool_axis / tool_axis.cwiseAbs().maxCoeff()).normalized();
+    Matrix3d frame;
+    const double xy = std::hypot(n.x(), n.y());
+    if (xy < 1e-6) {
+        frame.setIdentity();
+        if (n.z() < 0.)
+            frame.diagonal() << 1., -1., -1.;
+    } else {
+        const Vec3d y(-n.y() / xy, n.x() / xy, 0.);
+        frame.row(0) = y.cross(n).transpose();
+        frame.row(1) = y.transpose();
+        frame.row(2) = n.transpose();
+    }
+    return frame;
+}
 
 HotendEnvelope HotendEnvelope::from_config(const ConfigBase &config)
 {
