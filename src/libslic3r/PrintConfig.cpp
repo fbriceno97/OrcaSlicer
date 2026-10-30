@@ -1838,6 +1838,24 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionBool(false));
 
+    // Experimental Unlayered wave-overhangs; never silently enable for existing printer profiles.
+    def = this->add("wave_overhangs", coBool);
+    def->label = L("Experimental wave overhangs");
+    def->category = L("Quality");
+    def->tooltip = L("Experimental three-axis wave-overhang toolpaths. OFF by default. Not yet validated on Bambu A1/P2S; inspect G-code and nozzle clearances before printing.");
+    def->mode = comExpert;
+    def->set_default_value(new ConfigOptionBool(false));
+
+    def = this->add("wave_overhang_line_spacing", coFloat);
+    def->label = L("Wave line spacing");
+    def->category = L("Quality");
+    def->tooltip = L("Spacing between experimental wave-overhang traces, in millimeters.");
+    def->sidetext = L("mm");
+    def->mode = comExpert;
+    def->min = 0.15;
+    def->max = 2.0;
+    def->set_default_value(new ConfigOptionFloat(0.35));
+
     def = this->add("overhang_reverse", coBool);
     def->label = L("Reverse on even");
     def->full_label = L("Overhang reversal");
