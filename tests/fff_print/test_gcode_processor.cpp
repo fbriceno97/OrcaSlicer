@@ -5,6 +5,9 @@
 #include "libslic3r/Model.hpp"
 #include "libslic3r/Print.hpp"
 #include "libslic3r/PrintConfig.hpp"
+#include "libslic3r/Point.hpp"
+#include <utility>
+#include <cmath>
 
 #include "test_utils.hpp"
 
@@ -23,6 +26,17 @@ using Catch::Matchers::WithinAbs;
 
 namespace {
 
+void process_text(GCodeProcessor &processor, const std::string &text)
+{
+    ScopedTemporaryFile file(".gcode");
+    {
+        std::ofstream output(file.string());
+        output << text;
+    }
+    processor.apply_config(FullPrintConfig{});
+    processor.process_file(file.string());
+}
+
 float processed_belt_tilt(const std::string &gcode)
 {
     ScopedTemporaryFile temp(".gcode");
@@ -39,6 +53,69 @@ float processed_belt_tilt(const std::string &gcode)
 constexpr const char *body = "G1 X10 Y10 Z0.2 F3000\nG1 X20 Y10 E1 F1200\n";
 
 } // namespace
+
+TEST_CASE("Section and build-axis metadata follow the emitted moves", "[GCodeProcessor][Nonplanar]")
+{
+    GCodeProcessor processor;
+    process_text(processor,
+        "G90\nM83\nT0\n;TYPE:Outer wall\nG1 X0 Y0 Z1 F3000\n"
+        "; TOOL_AXIS:0,0,2\n;SEGMENT_ID:0\nG1 X10 E1 F1200\n"
+        "; TOOL_AXIS:1,0,1\n;SEGMENT_ID:1\nG1 X20 Z2 E1\n"
+        "; TOOL_AXIS:0,0,1\n;SEGMENT_ID:-1\nG1 X30 E1\n");
+    const auto &result = processor.get_result();
+    REQUIRE(result.nonplanar_metadata_valid);
+    REQUIRE(result.tool_axes.size() == 2);
+    unsigned extrusions = 0;
+    for (const auto &move : result.moves) {
+        if (move.type != EMoveType::Extrude || move.delta_extruder <= 0.f)
+            continue;
+        REQUIRE(move.tool_axis_id < result.tool_axes.size());
+        if (extrusions == 0) {
+            CHECK(move.cut_segment_id == 0);
+            CHECK(move.tool_axis_id == 0);
+        } else if (extrusions == 1) {
+            CHECK(move.cut_segment_id == 1);
+            CHECK_THAT(result.tool_axes[move.tool_axis_id].z(), WithinAbs(std::sqrt(0.5f), 1e-6f));
+        } else {
+            CHECK(move.cut_segment_id == -1);
+            CHECK(move.tool_axis_id == 0);
+        }
+        ++extrusions;
+    }
+    CHECK(extrusions == 3);
+
+    GCodeProcessorResult copied;
+    copied = result;
+    CHECK(copied.tool_axes == result.tool_axes);
+    GCodeProcessorResult moved;
+    moved = std::move(copied);
+    CHECK(moved.tool_axes == result.tool_axes);
+    REQUIRE(moved.moves.size() == result.moves.size());
+    CHECK(moved.moves.back().cut_segment_id == -1);
+}
+
+TEST_CASE("Reprocessing ordinary G-code clears earlier section metadata", "[GCodeProcessor][Nonplanar]")
+{
+    GCodeProcessor processor;
+    process_text(processor, ";TOOL_AXIS:1,0,1\n;SEGMENT_ID:4\nG1 X10 Y10 Z2 F1200\n");
+    REQUIRE(processor.get_result().tool_axes.size() == 2);
+    process_text(processor, "G1 X10 Y10 Z2 F1200\n");
+    REQUIRE(processor.get_result().tool_axes.size() == 1);
+    CHECK(processor.get_result().nonplanar_metadata_valid);
+    for (const auto &move : processor.get_result().moves) {
+        CHECK(move.cut_segment_id == -1);
+        CHECK(move.tool_axis_id == 0);
+    }
+}
+
+TEST_CASE("Malformed non-planar metadata prevents a clearance approval", "[GCodeProcessor][Nonplanar]")
+{
+    const std::string tag = GENERATE(";TOOL_AXIS:0,0,0\n", ";TOOL_AXIS:nan,0,1\n", ";TOOL_AXIS:1,2\n",
+                                     ";SEGMENT_ID:-2\n", ";SEGMENT_ID:2147483648\n");
+    GCodeProcessor processor;
+    process_text(processor, tag + "G1 X10 Y10 Z2 F1200\n");
+    CHECK_FALSE(processor.get_result().nonplanar_metadata_valid);
+}
 
 TEST_CASE("The config block's belt angle does not mark G-code as belt G-code", "[GCodeProcessor][belt]")
 {

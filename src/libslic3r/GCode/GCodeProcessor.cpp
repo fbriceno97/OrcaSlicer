@@ -126,7 +126,9 @@ const std::vector<std::string> GCodeProcessor::Reserved_Tags = {
     "@TOTAL_WEIGHT@",
     "@TOTAL_COST@",
     "@TOTAL_WIPE_TOWER_COST@",
-    "@TOTAL_WIPE_TOWER_FILAMENT@"
+    "@TOTAL_WIPE_TOWER_FILAMENT@",
+    " TOOL_AXIS:",
+    "SEGMENT_ID:"
 };
 
 const std::vector<std::string> GCodeProcessor::Reserved_Tags_compatible = {
@@ -159,7 +161,9 @@ const std::vector<std::string> GCodeProcessor::Reserved_Tags_compatible = {
     "@TOTAL_WEIGHT@",
     "@TOTAL_COST@",
     "@TOTAL_WIPE_TOWER_COST@",
-    "@TOTAL_WIPE_TOWER_FILAMENT@"
+    "@TOTAL_WIPE_TOWER_FILAMENT@",
+    " TOOL_AXIS:",
+    "SEGMENT_ID:"
 };
 
 
@@ -2583,6 +2587,8 @@ void GCodeProcessorResult::reset() {
 
     // moves and lines_ends grow with the print: free them, as no reset result reuses the capacity.
     clear_and_shrink(moves);
+    tool_axes.assign(1, Vec3f::UnitZ());
+    nonplanar_metadata_valid = true;
     plate_mass = {};
     object_masses.clear();
     body_masses.clear();
@@ -3697,6 +3703,8 @@ void GCodeProcessor::reset()
     m_used_filaments.reset();
 
     m_result.reset();
+    m_tool_axis_id = 0;
+    m_cut_segment_id = -1;
     m_result.id = ++s_result_id;
 
     m_last_default_color_id = 0;
@@ -4265,6 +4273,53 @@ bool GCodeProcessor::get_last_position_from_gcode(const std::string &gcode_str, 
 
 void GCodeProcessor::process_tags(const std::string_view comment, bool producers_enabled)
 {
+    std::string_view section_tag = comment;
+    while (!section_tag.empty() && (section_tag.front() == ' ' || section_tag.front() == '\t'))
+        section_tag.remove_prefix(1);
+    if (boost::starts_with(section_tag, "SEGMENT_ID:")) {
+        int segment;
+        if (parse_number(section_tag.substr(11), segment) && segment >= -1)
+            m_cut_segment_id = segment;
+        else
+            m_result.nonplanar_metadata_valid = false;
+        return;
+    }
+    if (boost::starts_with(section_tag, "TOOL_AXIS:")) {
+        const std::string_view payload = section_tag.substr(10);
+        const size_t first = payload.find(','), second = payload.find(',', first == std::string_view::npos ? 0 : first + 1);
+        float x, y, z;
+        if (payload.size() > 128 || first == std::string_view::npos || second == std::string_view::npos ||
+            !parse_number(payload.substr(0, first), x) ||
+            !parse_number(payload.substr(first + 1, second - first - 1), y) ||
+            !parse_number(payload.substr(second + 1), z)) {
+            m_result.nonplanar_metadata_valid = false;
+            return;
+        }
+        Vec3f axis(x, y, z);
+        const float scale = axis.cwiseAbs().maxCoeff();
+        if (!axis.allFinite() || scale == 0.f) {
+            m_result.nonplanar_metadata_valid = false;
+            return;
+        }
+        axis = (axis / scale).normalized();
+        if (!axis.allFinite() || axis.squaredNorm() < 0.5f) {
+            m_result.nonplanar_metadata_valid = false;
+            return;
+        }
+        auto found = std::find_if(m_result.tool_axes.begin(), m_result.tool_axes.end(), [&axis](const Vec3f &known) {
+            return (known - axis).squaredNorm() < 1e-12f;
+        });
+        if (found == m_result.tool_axes.end()) {
+            if (m_result.tool_axes.size() > std::numeric_limits<uint16_t>::max()) {
+                m_result.nonplanar_metadata_valid = false;
+                return;
+            }
+            m_tool_axis_id = static_cast<uint16_t>(m_result.tool_axes.size());
+            m_result.tool_axes.push_back(axis);
+        } else
+            m_tool_axis_id = static_cast<uint16_t>(found - m_result.tool_axes.begin());
+        return;
+    }
     // producers tags
     if (producers_enabled && process_producers_tags(comment))
         return;
@@ -7249,7 +7304,9 @@ void GCodeProcessor::store_move_vertex(EMoveType type, EMovePathType path_type, 
         std::max<unsigned int>(1, m_layer_id) - 1,
         internal_only,
         m_object_label_id,
-        m_print_z
+        m_print_z,
+        m_tool_axis_id,
+        m_cut_segment_id
     });
 
     if (type == EMoveType::Seam) {
