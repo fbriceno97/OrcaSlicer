@@ -3,6 +3,8 @@
 // AGPL-3.0-or-later attribution is preserved in WaveOverhangs source files.
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
+#include <catch2/matchers/catch_matchers.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <cstddef>
 #include <algorithm>
 #include <cmath>
@@ -141,4 +143,43 @@ TEST_CASE("A wave speed setting does not mark ordinary exported toolpaths as wav
     const std::string gcode = Test::slice({unsupported_shelf()}, config);
     CHECK(gcode.find("; WAVE_OVERHANG_BEGIN") == std::string::npos);
     CHECK(gcode.find("; WAVE_OVERHANG_END") == std::string::npos);
+}
+
+TEST_CASE("Wave cooling overrides restore ordinary cooling and respect layers without fans", "[WaveOverhangs][Windows]")
+{
+    const bool cooling_disabled = GENERATE(false, true);
+    DynamicPrintConfig config = settings(true);
+    config.set_deserialize_strict({
+        {"wave_overhang_fan_speed", "100"}, {"gcode_flavor", "marlin"},
+        {"fan_min_speed", "25"}, {"fan_max_speed", "25"},
+        {"reduce_fan_stop_start_freq", "1"}, {"enable_overhang_bridge_fan", "0"},
+        {"close_fan_the_first_x_layers", cooling_disabled ? "1000" : "0"},
+        {"initial_layer_fan_speed", "-1"}, {"part_cooling_fan_min_pwm", "0"}
+    });
+    const std::string output = Test::slice({unsupported_shelf()}, config);
+    CHECK(output.find(";_WAVE_FAN_") == std::string::npos);
+    GCodeReader reader;
+    reader.apply_config(config);
+    bool in_wave = false;
+    double fan_pwm = -1.;
+    size_t checked_extrusions = 0, checked_restores = 0;
+    reader.parse_buffer(output, [&](GCodeReader &state, const GCodeReader::GCodeLine &line) {
+        float speed, fan;
+        if (line.cmd_is("M106") && line.has_value('S', speed) && (!line.has_value('P', fan) || fan == 0.f))
+            fan_pwm = speed;
+        else if (line.cmd_is("M107"))
+            fan_pwm = 0.;
+        if (line.raw() == "; WAVE_OVERHANG_BEGIN")
+            in_wave = true;
+        else if (line.raw() == "; WAVE_OVERHANG_END") {
+            CHECK(fan_pwm < 255.);
+            ++checked_restores;
+            in_wave = false;
+        } else if (in_wave && line.extruding(state) && line.dist_XY(state) > 0.) {
+            CHECK_THAT(fan_pwm, Catch::Matchers::WithinAbs(cooling_disabled ? 0. : 255., 0.1));
+            ++checked_extrusions;
+        }
+    });
+    CHECK(checked_extrusions > 0);
+    CHECK(checked_restores > 0);
 }

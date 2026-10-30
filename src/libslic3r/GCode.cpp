@@ -9038,6 +9038,9 @@ std::string GCode::_extrude(const ExtrusionPath &path, const std::string &path_d
     // overhang role consumed by preview, cooling, and pressure advance.
     if (path.wave_overhang)
         gcode += "; WAVE_OVERHANG_BEGIN\n";
+    const bool wave_fan_override = path.wave_overhang && m_enable_cooling_markers && m_config.wave_overhang_fan_speed.value >= 0;
+    if (wave_fan_override)
+        gcode += ";_WAVE_FAN_START:" + std::to_string(m_config.wave_overhang_fan_speed.value) + "\n";
 
     const std::string  bridge_description = is_bridge(path.role()) ? path_description + " (bridge)" : std::string();
     const std::string &description        = bridge_description.empty() ? path_description : bridge_description;
@@ -10046,6 +10049,8 @@ std::string GCode::_extrude(const ExtrusionPath &path, const std::string &path_d
     }
 
     this->set_last_pos(path.last_point());
+    if (wave_fan_override)
+        gcode += ";_WAVE_FAN_END\n";
     if (path.wave_overhang)
         gcode += "; WAVE_OVERHANG_END\n";
     return gcode;

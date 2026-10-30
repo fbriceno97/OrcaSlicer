@@ -2937,6 +2937,7 @@ void TabPrint::build()
         optgroup->append_single_option_line("wave_overhangs");
         optgroup->append_single_option_line("wave_overhang_line_spacing");
         optgroup->append_single_option_line("wave_overhang_speed");
+        optgroup->append_single_option_line("wave_overhang_fan_speed");
         optgroup->append_single_option_line("overhang_reverse", "quality_settings_overhangs#reverse-on-even");
         optgroup->append_single_option_line("overhang_reverse_internal_only", "quality_settings_overhangs#reverse-internal-only");
         optgroup->append_single_option_line("overhang_reverse_threshold", "quality_settings_overhangs#reverse-threshold");

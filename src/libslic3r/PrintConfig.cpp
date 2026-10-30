@@ -1956,6 +1956,16 @@ void PrintConfigDef::init_fff_params()
     def->max = 100.0;
     def->set_default_value(new ConfigOptionFloat(10.0));
 
+    def = this->add("wave_overhang_fan_speed", coInt);
+    def->label = L("Wave overhang fan speed");
+    def->category = L("Cooling");
+    def->tooltip = L("Part-cooling fan speed during experimental wave-overhang traces. Use -1 to follow material settings. First-layer fan overrides and layers configured without cooling still apply; ordinary cooling resumes after each trace.");
+    def->sidetext = "%";
+    def->mode = comExpert;
+    def->min = -1;
+    def->max = 100;
+    def->set_default_value(new ConfigOptionInt(-1));
+
     def = this->add("overhang_reverse", coBool);
     def->label = L("Reverse on even");
     def->full_label = L("Overhang reversal");
