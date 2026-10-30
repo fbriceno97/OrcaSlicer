@@ -58,6 +58,10 @@ jobs:
           # Multi-Config), so ctest needs the config: without it, plain add_test() tests
           # lose their labels and report "Not Run".
           scripts/run_unit_tests.sh "${{ inputs.test-dir }}" Release
+      - name: Report test failures in check annotations
+        if: always()
+        shell: bash
+        run: python scripts/report_ctest_failures.py ctest_results.xml
       - name: Upload Test Logs
         if: ${{ failure() }}
         uses: actions/upload-artifact@v7
