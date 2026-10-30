@@ -469,6 +469,35 @@ jobs:
           path: ${{ runner.temp }}/nsis
           key: nsis-${{ env.NSIS_VERSION }}
 
+      - name: Compile and run experimental slicing regressions Win
+        if: runner.os == 'Windows' && github.repository == 'fbriceno97/OrcaSlicer' && (github.head_ref == 'feature/unlayered-wave-nonplanar' || github.ref_name == 'feature/unlayered-wave-nonplanar')
+        shell: pwsh
+        run: |
+          $deps = (Split-Path "${{ github.workspace }}/${{ inputs.cache-path }}").Replace('\', '/')
+          $flags = if ("${{ inputs.compiler }}" -eq "clang") { "-l", "-x" } else { "--msvc", "--msbuild" }
+          $buildLog = Join-Path $env:RUNNER_TEMP 'orca-slicing-tests-build.log'
+          & .\build_win.bat -s --tests --slicer-target fff_print_tests --arch ${{ inputs.arch }} --build-dir $env:BUILD_DIR --deps-dir $deps @flags 2>&1 | Tee-Object -FilePath $buildLog
+          $buildExit = $LASTEXITCODE
+          if ($buildExit -eq 0) {
+            cmake --build $env:BUILD_DIR --config Release --target libslic3r_tests 2>&1 | Tee-Object -FilePath $buildLog -Append
+            $buildExit = $LASTEXITCODE
+          }
+          if ($buildExit -ne 0) {
+            python scripts/report_build_failure.py $buildLog
+            exit $buildExit
+          }
+          $testExit = 0
+          foreach ($suite in @('fff_print', 'libslic3r')) {
+            $executables = @(Get-ChildItem "$env:BUILD_DIR/tests" -Recurse -Filter "${suite}_tests.exe")
+            if ($executables.Count -ne 1) { throw "Expected one $suite executable, found $($executables.Count)." }
+            $report = Join-Path $env:RUNNER_TEMP "orca-$suite-features.xml"
+            & $executables[0].FullName '[CutPlaneSegmentation],[HotendCollision],[WaveOverhangs],[Nonplanar]' --order rand --reporter junit --out $report
+            $suiteExit = $LASTEXITCODE
+            python scripts/report_ctest_failures.py $report
+            if ($suiteExit -ne 0) { $testExit = $suiteExit }
+          }
+          exit $testExit
+
       - name: Build slicer Win
         if: runner.os == 'Windows'
         working-directory: ${{ github.workspace }}
