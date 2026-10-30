@@ -14,6 +14,7 @@
 #include "Flow.hpp"
 #include "PrintConfig.hpp"
 #include "WaveOverhangs/AndersonsGenerator.hpp"
+#include "WaveOverhangs/IGenerator.hpp"
 #include "ShortestPath.hpp"
 #include "Surface.hpp"
 #include "VariableWidth.hpp"

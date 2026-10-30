@@ -2,6 +2,7 @@
 
 #include "Skeleton.hpp"
 #include "ObjectID.hpp"
+#include "Point.hpp"
 #include "TriangleMesh.hpp"
 #include <Eigen/Geometry>
 #include <map>

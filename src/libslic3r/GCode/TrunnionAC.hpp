@@ -30,6 +30,7 @@
 // verbatim (its A/C become the current orientation).
 
 #include <array>
+#include <cstddef>
 #include <iosfwd>
 #include <string>
 #include <vector>

@@ -20,6 +20,7 @@
 #include "libslic3r.h"
 #include "CommonDefs.hpp"
 #include "Config.hpp"
+#include "HotendEnvelope.hpp"
 #include "Polygon.hpp"
 #include <boost/container_hash/hash.hpp>
 #include <algorithm>

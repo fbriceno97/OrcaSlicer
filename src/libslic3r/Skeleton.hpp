@@ -1,6 +1,8 @@
 #pragma once
 
 #include <Eigen/Core>
+#include <algorithm>
+#include <utility>
 #include <vector>
 #include <admesh/stl.h>
 #include <map>

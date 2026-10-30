@@ -6,6 +6,7 @@
 #include "BeltTransform.hpp"
 #include "ClipperUtils.hpp"
 #include "Config.hpp"
+#include "HotendEnvelope.hpp"
 #include "Geometry.hpp"
 #include "FilamentMixer.hpp"
 #include "MaterialType.hpp"
@@ -81,6 +82,21 @@ void ReplaceString(std::string &resource_str, const std::string &old_str, const 
 }
 
 namespace Slic3r {
+
+HotendEnvelope HotendEnvelope::from_config(const ConfigBase &config)
+{
+    HotendEnvelope envelope;
+    if (const auto *height = config.option<ConfigOptionFloat>("nonplanar_hotend_cone_height"))
+        envelope.height = height->value;
+    for (int s = 0; s < 4; ++s) {
+        const auto side = HotendEnvelope::Side(s);
+        if (const auto *angle = config.option<ConfigOptionFloat>(option_key(side)))
+            envelope.angle[s] = angle->value;
+        envelope.spread(side); // Invalid imported values must not silently disable clearance limits.
+    }
+    envelope.enabled();
+    return envelope;
+}
 
 //! macro used to mark string used at localization,
 //! return same string

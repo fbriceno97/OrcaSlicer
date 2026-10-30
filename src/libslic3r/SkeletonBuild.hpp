@@ -17,6 +17,7 @@
 
 #include <functional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace Slic3r {

@@ -215,6 +215,8 @@ set(lisbslic3r_sources
     TextureToColor/ColorUtils.cpp
     Flow.cpp
     Flow.hpp
+    HotendEnvelope.cpp
+    HotendEnvelope.hpp
     FlushVolCalc.cpp
     FlushVolCalc.hpp
     Format/3mf.cpp

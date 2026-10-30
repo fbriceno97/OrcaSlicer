@@ -38,6 +38,7 @@ add_executable(${_TEST_NAME}_tests
     test_fill_plane_path.cpp
     test_fill_tpms_adaptive.cpp
     test_geometry.cpp
+    test_hotend_envelope.cpp
     test_imex_arrange.cpp
     test_imex_helpers.cpp
     test_imex_zones.cpp

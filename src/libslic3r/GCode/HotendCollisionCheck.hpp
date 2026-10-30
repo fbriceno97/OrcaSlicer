@@ -3,6 +3,7 @@
 
 #include "GCodeProcessor.hpp"
 #include "../PrintConfig.hpp"
+#include "../HotendEnvelope.hpp"
 #include "TrunnionAC.hpp"
 
 #include <optional>
