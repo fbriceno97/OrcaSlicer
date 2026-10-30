@@ -1,6 +1,7 @@
 #include "GLGizmoCutPlanes.hpp"
 #include "GLGizmoCut.hpp"
-#include "CommonGizmosDataPool.hpp"
+#include "GLGizmosCommon.hpp"
+#include "GLGizmoBase.hpp"
 
 #include "slic3r/GUI/3DScene.hpp"
 #include "slic3r/GUI/Camera.hpp"
@@ -10,6 +11,7 @@
 #include "slic3r/GUI/ImGuiWrapper.hpp"
 #include "slic3r/GUI/I18N.hpp"
 #include "slic3r/GUI/Selection.hpp"
+#include "slic3r/GUI/MeshUtils.hpp"
 #include "slic3r/GUI/GUI.hpp"
 #include "slic3r/GUI/GUI_App.hpp"
 #include "slic3r/GUI/GUI_ObjectList.hpp"
@@ -60,6 +62,8 @@
 #include <imgui_internal.h>
 #include <wx/filesys.h>
 #include <wx/filename.h>
+#include <wx/defs.h>
+#include <wx/string.h>
 
 namespace Slic3r { namespace GUI {
 

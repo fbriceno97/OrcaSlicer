@@ -9,6 +9,8 @@
 #include "libslic3r/CutPlaneSegmentation.hpp"
 #include "libslic3r/CutPlanes.hpp"
 #include "libslic3r/Point.hpp"
+#include "libslic3r/Model.hpp"
+#include <cereal/archives/binary.hpp>
 
 #include <memory>
 #include <optional>

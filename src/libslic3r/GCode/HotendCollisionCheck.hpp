@@ -24,8 +24,8 @@ namespace Slic3r {
 // orientation change. The pyramid's faces turn with the head: tool_head_frame() gives the head's
 // real orientation for that axis on a 5-axis machine. On a virtual 5-axis (3-axis) printer the
 // nozzle never tilts, so `upright` holds the pyramid vertical with its faces along machine X/Y
-// whatever axis the chunk was tagged with. A planar print has a single tool axis and is never
-// checked (returns nullopt immediately), so ordinary slicing pays nothing.
+// whatever axis the chunk was tagged with. Ordinary planar output without section markers is
+// skipped; sections with matching build axes still have their transitions checked.
 struct HotendCollisionParams
 {
     HotendEnvelope envelope;          // height <= 0 disables the check

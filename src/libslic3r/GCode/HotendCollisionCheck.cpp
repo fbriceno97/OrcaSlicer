@@ -14,6 +14,7 @@
 #include <boost/log/trivial.hpp>
 
 #include <algorithm>
+#include <array>
 #include <climits>
 #include <cmath>
 #include <cstdint>
