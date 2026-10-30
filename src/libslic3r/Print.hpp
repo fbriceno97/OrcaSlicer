@@ -3,6 +3,7 @@
 
 #include "Config.hpp"
 #include "Model.hpp"
+#include "CutPlaneSegmentation.hpp"
 #include "Polygon.hpp"
 #include "Fill/FillBase.hpp"
 #include "Polyline.hpp"
@@ -374,6 +375,9 @@ public:
     ConstLayerPtrsAdaptor        layers() const         { return ConstLayerPtrsAdaptor(&m_layers); }
     ConstSupportLayerPtrsAdaptor support_layers() const { return ConstSupportLayerPtrsAdaptor(&m_support_layers); }
     const Transform3d&           trafo() const          { return m_trafo; }
+    const std::optional<CutSegmentDescriptor>& segment() const { return m_segment; }
+    int                         segment_index() const { return m_segment ? m_segment->index : -1; }
+    size_t                      nonplanar_instance_key() const { return m_nonplanar_instance_key; }
     // Trafo with the center_offset() applied after the transformation, to center the object in XY before slicing.
     Transform3d                  trafo_centered() const
         { Transform3d t = this->trafo(); t.pretranslate(Vec3d(- unscale<double>(m_center_offset.x()), - unscale<double>(m_center_offset.y()), 0)); return t; }
@@ -666,6 +670,8 @@ private:
     PrintObjectConfig                       m_config;
     // Translation in Z + Rotation + Scaling / Mirroring.
     Transform3d                             m_trafo = Transform3d::Identity();
+    std::optional<CutSegmentDescriptor>      m_segment;
+    size_t                                  m_nonplanar_instance_key {0};
     // Slic3r::Point objects in scaled G-code coordinates
     std::vector<PrintInstance>              m_instances;
     // The mesh is being centered before thrown to Clipper, so that the Clipper's fixed coordinates require less bits.

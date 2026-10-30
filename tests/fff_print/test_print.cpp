@@ -132,6 +132,44 @@ TEST_CASE("Editing cut planes invalidates cached slicing and blocks unsupported 
     CHECK(print.is_step_done(posSlice));
 }
 
+TEST_CASE("Cut sections retain separate instance identities and reuse unchanged plans", "[Print][CutPlaneSegmentation]")
+{
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}});
+    Print print;
+    Model model;
+    init_print({cube(20.)}, print, model, config);
+    ModelObject *object = model.objects.front();
+    object->add_instance()->set_offset(Vec3d(90., 90., 0.));
+    object->cut_planes.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(10., 10., 10.);
+    object->cut_planes.planes.push_back(plane);
+    print.apply(model, config);
+    REQUIRE(print.objects().size() == 4);
+    std::map<size_t, std::vector<int>> sections_by_instance;
+    std::vector<PrintObject *> original_plan;
+    for (PrintObject *section : print.objects()) {
+        REQUIRE(section->segment().has_value());
+        REQUIRE(section->instances().size() == 1);
+        sections_by_instance[section->nonplanar_instance_key()].push_back(section->segment_index());
+        original_plan.push_back(section);
+    }
+    REQUIRE(sections_by_instance.size() == 2);
+    const std::vector<int> expected_sections {0, 1};
+    for (const auto &entry : sections_by_instance)
+        CHECK(entry.second == expected_sections);
+    print.apply(model, config);
+    CHECK(print.objects() == original_plan);
+    CHECK_THROWS_AS(print.process(), SlicingError);
+
+    config.set_deserialize_strict({{"enable_nonplanar", "0"}});
+    print.apply(model, config);
+    REQUIRE(print.objects().size() == 1);
+    CHECK_FALSE(print.objects().front()->segment().has_value());
+    CHECK(print.objects().front()->instances().size() == 2);
+}
+
 TEST_CASE("Timelapse g-code is emitted once per layer for Bambu and non-Bambu printers", "[Print][Regression]")
 {
     struct PrinterCase {
