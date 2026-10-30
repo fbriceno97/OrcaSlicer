@@ -141,6 +141,12 @@ set(lisbslic3r_sources
     ExtrusionEntityCollection.hpp
     ExtrusionEntity.cpp
     ExtrusionEntity.hpp
+    # Unlayered wave toolpath engine (feature opt-in, off by default).
+    WaveOverhangs/WaveOverhangs.cpp
+    WaveOverhangs/WaveOverhangs.hpp
+    WaveOverhangs/IGenerator.hpp
+    WaveOverhangs/AndersonsGenerator.cpp
+    WaveOverhangs/AndersonsGenerator.hpp
     ExtrusionSimulator.cpp
     ExtrusionSimulator.hpp
     FaceDetector.cpp
