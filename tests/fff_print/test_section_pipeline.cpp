@@ -27,6 +27,8 @@
 #include "libslic3r/Model.hpp"
 #include "libslic3r/ExtrusionEntity.hpp"
 #include "test_helpers.hpp"
+#include "test_utils.hpp"
+#include "libslic3r/Exception.hpp"
 
 #include <Eigen/Geometry>
 #include <boost/filesystem/operations.hpp>
@@ -248,6 +250,70 @@ TEST_CASE("Sliced inherited supports retain contact height and flow in section G
         std::ofstream fixture((boost::filesystem::path(directory) / "nonplanar-inherited-support.gcode").string(), std::ios::binary);
         REQUIRE(fixture.is_open());
         fixture << "; Software perimeter/support fixture with elevated travel; NOT printer-ready.\n" << program;
+        fixture.flush();
+        REQUIRE(fixture.good());
+    }
+}
+
+TEST_CASE("Production export preserves section order and world heights for a perimeter-only partition", "[Nonplanar][GCode]")
+{
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"print_sequence", "by object"},
+        {"enable_support", "0"}, {"layer_height", "0.2"}, {"initial_layer_print_height", "0.2"},
+        {"sparse_infill_density", "0%"}, {"top_shell_layers", "0"}, {"bottom_shell_layers", "0"},
+        {"top_shell_thickness", "0"}, {"bottom_shell_thickness", "0"},
+        {"wall_loops", "2"}, {"skirts", "0"}, {"brim_type", "no_brim"},
+        {"use_relative_e_distances", "1"}, {"travel_speed_z", "4"},
+        {"machine_start_gcode", "G90\nM83\nG1 X0 Y0 Z2 F240\n"},
+        {"machine_end_gcode", "M400\n"}, {"before_layer_change_gcode", ""},
+        {"layer_change_gcode", "G1 Z{layer_z}\n"}, {"time_lapse_gcode", ""}});
+    Print print;
+    Model model;
+    Slic3r::Test::init_print({Slic3r::Test::cube(20.)}, print, model, config);
+    ModelObject *object = model.objects.front();
+    object->instances.front()->set_offset(Vec3d(60., 60., 0.));
+    object->cut_planes.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(10., 10., 10.);
+    object->cut_planes.planes.push_back(plane);
+    print.apply(model, config);
+    print.set_status_silent();
+    // Exercise the existing lower-level exporter in a software fixture. Public
+    // Print processing remains guarded; no application export bypass is added.
+    REQUIRE_THROWS_AS(print.process(), SlicingError);
+    const auto families = section_support_families(print);
+    REQUIRE(families.size() == 1);
+    generate_section_support_family(families.front());
+    ScopedTemporaryFile file(".gcode");
+    GCodeProcessorResult result;
+    GCode generator;
+    REQUIRE_NOTHROW(generator.do_export(&print, file.string().c_str(), &result));
+    REQUIRE(result.nonplanar_metadata_valid);
+    size_t root_moves = 0, child_moves = 0;
+    bool child_started = false;
+    for (const auto &move : result.moves) {
+        if (move.type != EMoveType::Extrude || move.delta_extruder <= 0.f)
+            continue;
+        if (move.cut_segment_id == 0) {
+            CHECK_FALSE(child_started);
+            CHECK(move.position.z() <= 10.001f);
+            ++root_moves;
+        } else if (move.cut_segment_id == 1) {
+            child_started = true;
+            CHECK(move.position.z() >= 9.999f);
+            ++child_moves;
+        }
+    }
+    CHECK(root_moves > 0);
+    CHECK(child_moves > 0);
+    CHECK_NOTHROW(print.validate_nonplanar_gcode(result));
+    if (const char *directory = std::getenv("ORCA_TEST_GCODE_ARTIFACT_DIR"); directory && *directory) {
+        boost::filesystem::create_directories(directory);
+        std::ifstream source(file.string(), std::ios::binary);
+        std::ofstream fixture((boost::filesystem::path(directory) / "nonplanar-production-perimeters.gcode").string(), std::ios::binary);
+        REQUIRE(source.is_open());
+        REQUIRE(fixture.is_open());
+        fixture << "; Software production-export fixture only; NOT printer-ready.\n" << source.rdbuf();
         fixture.flush();
         REQUIRE(fixture.good());
     }
