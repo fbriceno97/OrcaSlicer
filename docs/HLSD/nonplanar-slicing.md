@@ -105,7 +105,9 @@ a configured hotend model; generic defaults do not establish physical printer
 clearance.
 
 With non-planar validation enabled, unannotated XYZ motion also receives the
-chronological upright-nozzle check. Removing section comments during
+chronological upright-nozzle check. Upright checks use the same spatial index
+against sampled material within and across section boundaries; moving a section
+marker does not switch to a rounded XY grid. Removing section comments during
 post-processing cannot turn off clearance validation. Ordinary printing with the
 experimental option disabled retains its existing export path.
 Wipe motion is included in the nozzle sweep, and positive-extrusion wipes add

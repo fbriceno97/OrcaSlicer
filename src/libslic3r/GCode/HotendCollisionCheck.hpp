@@ -27,7 +27,9 @@ namespace Slic3r {
 // nozzle never tilts, so `upright` holds the pyramid vertical with its faces along machine X/Y
 // whatever axis the chunk was tagged with. Section markers partition episodes;
 // unannotated motion is still checked when the caller enables validation.
-// Upright nozzles also check earlier deposition within the same episode in motion order.
+// Upright nozzles use one sampled spatial-query method within and across episodes,
+// inserting current-episode material only after deposition. Travel-only episodes
+// are checked against all earlier deposition.
 struct HotendCollisionParams
 {
     HotendEnvelope envelope;          // height <= 0 disables the check

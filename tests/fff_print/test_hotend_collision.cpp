@@ -261,3 +261,25 @@ TEST_CASE("Edited XYZ motion is collision checked without section comments", "[H
     print.apply(model, config);
     CHECK_NOTHROW(print.validate_nonplanar_gcode_file(edited.string()));
 }
+
+TEST_CASE("Upright clearance is unchanged by section boundaries near a narrow contact", "[HotendCollision]")
+{
+    const bool separate = GENERATE(false, true);
+    const bool clear = GENERATE(false, true);
+    GCodeProcessorResult result;
+    const std::vector<Vec3f> positions {Vec3f(0.f, 0.f, 0.5f), Vec3f(0.01f, 0.f, 0.5f),
+        Vec3f(2.f, 0.f, 2.f), Vec3f(clear ? 1.f : 0.25f, 0.f, 0.2f)};
+    for (size_t i = 0; i < positions.size(); ++i) {
+        GCodeProcessorResult::MoveVertex move;
+        move.position = positions[i];
+        move.type = i == 0 ? EMoveType::Noop : (i == 1 ? EMoveType::Extrude : EMoveType::Travel);
+        move.delta_extruder = i == 1 ? 1.f : 0.f;
+        move.cut_segment_id = separate && i > 1 ? 1 : 0;
+        move.gcode_id = static_cast<unsigned>(i + 1);
+        result.moves.push_back(move);
+    }
+    HotendCollisionParams params;
+    params.margin = 0.;
+    params.eps = 0.01;
+    CHECK(check_hotend_collisions(result, params).has_value() == !clear);
+}

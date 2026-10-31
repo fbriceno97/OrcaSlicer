@@ -215,7 +215,7 @@ std::optional<ConflictResult> check_hotend_collisions(const GCodeProcessorResult
         if (params.throw_on_cancel)
             params.throw_on_cancel();
         const Episode &e = episodes[ei];
-        if (ei > 0 && ! earlier.empty() && ! e.tips.empty()) {
+        if (!(params.upright && !params.ac) && ei > 0 && ! earlier.empty() && ! e.tips.empty()) {
             // head frame: (u, v, a) = R * p, with u / v along the head's own +X / +Y faces
             const Eigen::Matrix3d R = params.upright ? Eigen::Matrix3d::Identity() :
                                       ! ac_frames.empty() ? ac_frames[ei] : Eigen::Matrix3d(tool_head_frame(e.axis));
@@ -319,17 +319,23 @@ std::optional<ConflictResult> check_hotend_collisions(const GCodeProcessorResult
                 }
             }
         }
-        if (params.upright && !params.ac && worst.pen < 0. && !e.material.empty()) {
-            // Insert material only after its deposition time. This catches downhill
-            // motion and travel within a section, while avoiding queries against
-            // layers that have not been printed yet. Planar rising layers prune
-            // quickly because their earlier material is below the query box.
+        if (params.upright && !params.ac && worst.pen < 0. && !e.tips.empty()) {
+            // Use the same sampled geometry across section boundaries as within
+            // them. Grid rounding must not change clearance when only metadata
+            // changes. Earlier episodes are already printed; current material
+            // enters the index only after its deposition time.
             namespace bg = boost::geometry;
             namespace bgi = boost::geometry::index;
             using SpatialPoint = bg::model::point<double, 3, bg::cs::cartesian>;
             using Entry = std::pair<SpatialPoint, size_t>;
             bgi::rtree<Entry, bgi::quadratic<16>> deposited;
             std::vector<Entry> candidates;
+            for (size_t i = 0; i < earlier.size(); ++i) {
+                if (params.throw_on_cancel && i % 1024 == 0)
+                    params.throw_on_cancel();
+                const Vec3d &p = earlier[i].p;
+                deposited.insert({SpatialPoint(p.x(), p.y(), p.z()), i});
+            }
             size_t next_material = 0;
             size_t checked_tips = 0;
             for (const Sample &tip : e.tips) {
@@ -337,7 +343,7 @@ std::optional<ConflictResult> check_hotend_collisions(const GCodeProcessorResult
                     params.throw_on_cancel();
                 while (next_material < e.material.size() && e.material[next_material].order < tip.order) {
                     const Vec3d &p = e.material[next_material].p;
-                    deposited.insert({SpatialPoint(p.x(), p.y(), p.z()), next_material++});
+                    deposited.insert({SpatialPoint(p.x(), p.y(), p.z()), earlier.size() + next_material++});
                 }
                 const double reach = H + params.margin;
                 const bg::model::box<SpatialPoint> box(
@@ -346,7 +352,9 @@ std::optional<ConflictResult> check_hotend_collisions(const GCodeProcessorResult
                 candidates.clear();
                 deposited.query(bgi::intersects(box), std::back_inserter(candidates));
                 for (const Entry &candidate : candidates) {
-                    const Sample &material = e.material[candidate.second];
+                    const size_t sample_index = candidate.second;
+                    const bool previous_episode = sample_index < earlier.size();
+                    const Sample &material = previous_episode ? earlier[sample_index] : e.material[sample_index - earlier.size()];
                     const Vec3d delta = material.p - tip.p;
                     const double h = delta.z();
                     if (h <= params.eps || h >= H)
@@ -360,7 +368,8 @@ std::optional<ConflictResult> check_hotend_collisions(const GCodeProcessorResult
                     if (*face < 0.)
                         continue;
                     worst.pen = *face;
-                    worst.episode = worst.source = ei;
+                    worst.episode = ei;
+                    worst.source = previous_episode ? earlier_episode[sample_index] : ei;
                     worst.tip = tip;
                     worst.mat = material;
                     worst.height = h;
