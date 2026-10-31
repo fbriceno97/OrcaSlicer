@@ -14,6 +14,7 @@
 #include <cstddef>
 #include <fstream>
 #include <initializer_list>
+#include <map>
 #include <string>
 #include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -33,6 +34,7 @@ void process_text(GCodeProcessor &processor, const std::string &text)
         std::ofstream output(file.string());
         output << text;
     }
+    processor.reset();
     processor.apply_config(FullPrintConfig{});
     processor.process_file(file.string());
 }
@@ -65,24 +67,26 @@ TEST_CASE("Section and build-axis metadata follow the emitted moves", "[GCodePro
     const auto &result = processor.get_result();
     REQUIRE(result.nonplanar_metadata_valid);
     REQUIRE(result.tool_axes.size() == 2);
-    unsigned extrusions = 0;
+    std::map<unsigned, size_t> extrusion_commands;
     for (const auto &move : result.moves) {
         if (move.type != EMoveType::Extrude || move.delta_extruder <= 0.f)
             continue;
         REQUIRE(move.tool_axis_id < result.tool_axes.size());
-        if (extrusions == 0) {
+        // Time processing can split one extrusion into acceleration/cruise/
+        // deceleration vertices. Every vertex must retain its source tags.
+        const size_t extrusion = extrusion_commands.try_emplace(move.gcode_id, extrusion_commands.size()).first->second;
+        if (extrusion == 0) {
             CHECK(move.cut_segment_id == 0);
             CHECK(move.tool_axis_id == 0);
-        } else if (extrusions == 1) {
+        } else if (extrusion == 1) {
             CHECK(move.cut_segment_id == 1);
             CHECK_THAT(result.tool_axes[move.tool_axis_id].z(), WithinAbs(std::sqrt(0.5f), 1e-6f));
         } else {
             CHECK(move.cut_segment_id == -1);
             CHECK(move.tool_axis_id == 0);
         }
-        ++extrusions;
     }
-    CHECK(extrusions == 3);
+    CHECK(extrusion_commands.size() == 3);
 
     GCodeProcessorResult copied;
     copied = result;

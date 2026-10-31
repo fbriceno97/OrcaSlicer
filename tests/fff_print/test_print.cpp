@@ -54,6 +54,7 @@
 
 #include <algorithm>
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/algorithm/string/trim.hpp>
 #include <cstdlib>
 #include <sstream>
 #include <limits>
@@ -92,8 +93,11 @@ TEST_CASE("Disabled non-planar mode preserves ordinary motion despite stored cut
         std::vector<std::string> moves;
         GCodeReader reader;
         reader.parse_buffer(text, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
-            if (line.cmd_is("G0") || line.cmd_is("G1") || line.cmd_is("G2") || line.cmd_is("G3"))
-                moves.push_back(line.raw().substr(0, line.raw().find(';')));
+            if (line.cmd_is("G0") || line.cmd_is("G1") || line.cmd_is("G2") || line.cmd_is("G3")) {
+                std::string move = line.raw().substr(0, line.raw().find(';'));
+                boost::trim_right(move);
+                moves.push_back(std::move(move));
+            }
         });
         return moves;
     };
