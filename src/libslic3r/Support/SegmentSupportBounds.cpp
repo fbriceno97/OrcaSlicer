@@ -101,7 +101,9 @@ void SegmentSupportBounds::clip_extrusions(ExtrusionEntityCollection &extrusions
         if (path.z_contoured || dynamic_cast<const ExtrusionPathContoured *>(&path) ||
             dynamic_cast<const ExtrusionPathSloped *>(&path) ||
             !std::isfinite(path.width) || path.width <= 0.f ||
-            !std::isfinite(path.height) || path.height <= 0.f)
+            !std::isfinite(path.height) || path.height <= 0.f ||
+            std::any_of(path.polyline.points.begin(), path.polyline.points.end(),
+                [](const Point3 &point) { return point.z() != 0; }))
             throw std::invalid_argument("Invalid or nonplanar section support path");
         const Polygons valid = valid_region_polygon(print_z, std::max(layer_height, double(path.height)));
         const ExPolygons centers = offset_ex(valid, -scale_(double(path.width) / 2.));

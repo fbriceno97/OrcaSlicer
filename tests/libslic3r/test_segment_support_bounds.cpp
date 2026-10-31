@@ -268,10 +268,16 @@ TEST_CASE("Final support containment clips expanded paths and nested islands at 
 
 TEST_CASE("Invalid final support geometry leaves source ownership intact", "[cutplanes][supports]")
 {
+    const int invalid = GENERATE(0, 1, 2);
     const SegmentSupportBounds bounds(non_root_segment({
         clip_keeping_above(Vec3d::UnitX(), 0., CutClipRole::Floor)}), Transform3d::Identity());
     ExtrusionEntityCollection source;
-    auto *path = new ExtrusionPath(erSupportMaterial, 0.1, -1.f, 0.2f);
+    auto *path = new ExtrusionPath(erSupportMaterial, 0.1, invalid == 0 ? -1.f : 1.f, 0.2f);
+    path->polyline = Polyline3(Polyline({Point::new_scale(0., 0.), Point::new_scale(5., 5.)}));
+    if (invalid == 1)
+        path->z_contoured = true;
+    else if (invalid == 2)
+        path->polyline.points.front().z() = scale_(1.);
     source.entities.push_back(path);
     CHECK_THROWS_AS(bounds.clip_extrusions(source, 1., 0.2), std::invalid_argument);
     REQUIRE(source.entities.size() == 1);
