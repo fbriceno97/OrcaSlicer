@@ -2,6 +2,7 @@
 #define slic3r_NonplanarSliceJob_hpp_
 
 #include <string>
+#include <exception>
 #include <vector>
 
 #include <boost/filesystem/path.hpp>

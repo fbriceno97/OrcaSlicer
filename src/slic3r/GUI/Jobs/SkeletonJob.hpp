@@ -18,11 +18,14 @@
 #include "libslic3r/SkeletonBuild.hpp"
 #include "libslic3r/ObjectID.hpp"
 #include "libslic3r/TriangleMesh.hpp"
+#include "libslic3r/Point.hpp"
 
 #include <atomic>
+#include <exception>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <utility>
 
 namespace Slic3r { namespace GUI {
 
