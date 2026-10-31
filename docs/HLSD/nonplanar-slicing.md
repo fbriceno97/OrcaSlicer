@@ -106,8 +106,8 @@ floating bases is rejected by the family generator.
 
 Print validation, processing and export enforce the same section compatibility
 rules. Cut-plane sections use an upright root at the physical bed, one printing
-filament, By object sequencing, and no prime tower, skirt, brim, raft or spiral
-vase. Child build directions follow their supporting cut-plane normals.
+filament, By object sequencing, and no prime tower, raft, spiral vase or draft
+shield. Child build directions follow their supporting cut-plane normals.
 Independent part directions, tilted/floating roots and floating child bases are
 rejected with a setting-specific error. The printer's hotend/gantry model also
 limits the allowed build direction. Projects without active derived sections
@@ -154,8 +154,13 @@ schedule also bypasses initial bed fan overrides, fan-off periods and fan ramps,
 while keeping each local layer's filament-variant configuration. Wave fan
 controls remain available on elevated sections. Legacy last-Z-only macro fallbacks
 are skipped inside sections because full endpoint parsing already tracks relative
-motion and unit changes. Raft and skirt/brim scheduling still need
-production-export integration and are rejected by the compatibility check.
+motion and unit changes. Rafts and draft shields across sections are rejected
+by the compatibility check. Brims and finite-height skirts belong only to upright
+bed roots. Volume-group brim generation, bed hulls and skirt grouping exclude
+rebased children, and section emission never repeats bed adhesion at an elevated
+local layer zero. Combined/per-object grouping still distinguishes physical
+copies; the automatic brim calculation retains the full model-volume height.
+Skirts stop when their bed root's local schedule ends.
 Timelapse parking is omitted in active sections, including farthest-point camera
 placement, with a validation warning. Ordinary prints retain their timelapse
 behavior. Unsupported directed-part descriptors are rejected rather than falling

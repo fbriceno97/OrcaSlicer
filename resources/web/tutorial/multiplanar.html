@@ -104,9 +104,11 @@ values as measurements of your machine.</li>
 <ul>
 <li>Choose <span class="ui">By object</span> print sequencing and use one printing filament.</li>
 <li>Turn off the prime tower and spiral vase mode.</li>
-<li>Set <span class="ui">Skirt loops</span> to 0,
-<span class="ui">Brim type</span> to <span class="ui">No-brim</span>, and
-<span class="ui">Raft layers</span> to 0.</li>
+<li>Set <span class="ui">Raft layers</span> to 0 and disable the draft shield.
+Brims and finite-height skirts are supported on the upright bed root; they do not
+repeat on elevated sections. Skirts stop when the root section finishes.
+For a minimal first software check, choose <span class="ui">Skirt loops</span> 0
+and <span class="ui">Brim type</span> <span class="ui">No-brim</span>.</li>
 <li>Keep the object's bottom section upright on the bed. Leave independent object/part
 build directions at their defaults; set upper section directions by tilting their cut planes.</li>
 </ul>
@@ -156,7 +158,7 @@ supported walls do not become waves. Inspect their paths and cooling before any 
 <table><thead><tr><th>Message or symptom</th><th>What to check</th></tr></thead><tbody>
 <tr><td>Cut Planes is unavailable</td><td>Select one object and enable the printer's Expert non-planar setting.</td></tr>
 <tr><td>No enabled plane divides the object</td><td>Move the plane through printable material and add it to the list.</td></tr>
-<tr><td>A setting combination is unsupported</td><td>Use By object sequencing, one filament, no prime tower/skirt/brim/raft/vase, and an upright bed root.</td></tr>
+<tr><td>A setting combination is unsupported</td><td>Use By object sequencing, one filament, no prime tower/raft/vase/draft shield, and an upright bed root.</td></tr>
 <tr><td>Floating base or incompatible build direction</td><td>Make the section rest on its cut plane and let its direction follow that plane.</td></tr>
 <tr><td>Hotend/gantry tilt limit exceeded</td><td>Reduce the tilt or use gentler sections. Do not enlarge clearance values just to bypass a rejection.</td></tr>
 <tr><td>Custom macro rejected</td><td>Section macros cannot extrude, home, reset XYZ coordinates, change motion limits, or conditionally move XYZ. The standard G92 E0 reset is supported in relative extrusion mode. They must restore absolute positioning and millimeters.</td></tr>

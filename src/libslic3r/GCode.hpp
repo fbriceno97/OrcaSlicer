@@ -5,7 +5,6 @@
 #include "Polygon.hpp"
 #include "Config.hpp"
 #include "Print.hpp"
-#include "CutPlaneSegmentation.hpp"
 #include "libslic3r.h"
 #include "GCodeWriter.hpp"
 #include "GCode/BeltKinematics.hpp"
@@ -950,11 +949,7 @@ protected:
             return false;
         if (m_layer->object() == nullptr)
             return true;
-        const auto &section = m_layer->object()->segment();
-        // Rebased child layers start at local zero above existing material.
-        // Only an upright root at the physical bed has whole-layer bed settings.
-        return !section || (section->is_root() && section->root_builds_up &&
-            std::abs(section->slice_z_base()) < EPSILON);
+        return m_layer->object()->uses_bed_adhesion();
     }
     // Per-point first-layer test.  On a belt printer the result depends on the
     // supplied slicing-frame point (its height above the belt). Section paths
@@ -985,8 +980,7 @@ protected:
         if (m_layer != nullptr && m_layer->object() != nullptr && m_layer->object()->segment()) {
             if (on_first_layer(point_slicing_mm))
                 return 0;
-            const auto &section = *m_layer->object()->segment();
-            if (!section.is_root() || !section.root_builds_up || std::abs(section.slice_z_base()) >= EPSILON)
+            if (!m_layer->object()->uses_bed_adhesion())
                 // A new section does not restart the bed-layer speed ramp.
                 return m_config.slow_down_layers.value > 1 ? m_config.slow_down_layers.value : 1;
         }

@@ -173,8 +173,8 @@ static StringObjectException nonplanar_compatibility_error(const Print &print)
         return error(first_section, L("Non-planar sections currently require one printing filament and no prime tower."), "enable_prime_tower");
     if (config.spiral_mode.value)
         return error(first_section, L("Spiral vase mode is not supported with non-planar sections."), "spiral_mode");
-    if (config.skirt_loops.value > 0 && config.skirt_height.value > 0)
-        return error(first_section, L("Disable the skirt when printing non-planar sections."), "skirt_loops");
+    if (config.draft_shield.value != dsDisabled && config.skirt_loops.value > 0)
+        return error(first_section, L("Draft shields across non-planar sections are not supported. Use a finite-height skirt."), "draft_shield");
     HotendEnvelope envelope;
     try {
         envelope = HotendEnvelope::from_config(config);
@@ -196,8 +196,6 @@ static StringObjectException nonplanar_compatibility_error(const Print &print)
                     return error(object, L("A section's build direction must be perpendicular to its supporting cut plane."), "enable_nonplanar");
             if (object->has_raft())
                 return error(object, L("Disable the raft when printing non-planar sections."), "raft_layers");
-            if (object->has_brim())
-                return error(object, L("Disable the brim when printing non-planar sections."), "brim_type");
             if (object->instances().size() != 1)
                 return error(object, L("A non-planar section requires a distinct physical copy identity."), "enable_nonplanar");
             const Vec3d axis = object->instances().front().get_slice_to_world_transform().linear().col(2).normalized();
@@ -4152,6 +4150,8 @@ void Print::_make_skirt()
     coordf_t skirt_height_z = 0.;
     if (generate_skirt) {
         for (const PrintObject *object : m_objects) {
+            if (!object->uses_bed_adhesion() || object->m_layers.empty())
+                continue;
             size_t skirt_layers = this->has_infinite_skirt() ?
                 object->layer_count() :
                 std::min(size_t(m_config.skirt_height.value), object->layer_count());
@@ -4168,6 +4168,9 @@ void Print::_make_skirt()
     // geometry up to skirt height. Instances translate this hull later.
     std::vector<ObjectSkirtHull> object_convex_hulls;
     for (PrintObject *object : m_objects) {
+        object->m_skirt.clear();
+        if (!object->uses_bed_adhesion())
+            continue;
         Points object_points;
         // Get object layers up to skirt_height_z.
         for (const Layer *layer : object->m_layers) {
@@ -4271,9 +4274,6 @@ void Print::_make_skirt()
     m_skirt.clear();
     m_skirt_brim_groups.clear();
     m_has_shared_per_object_skirt = false;
-    for (const ObjectSkirtHull& object_hull : object_convex_hulls)
-        object_hull.object->m_skirt.clear();
-
     if (m_config.skirt_type == stCombined || m_config.skirt_type == stPerObject) {
         struct SkirtBrimGroupItem {
             Points       occupied_points;
@@ -4489,6 +4489,8 @@ Polygons Print::first_layer_islands() const
 {
     Polygons islands;
     for (PrintObject *object : m_objects) {
+        if (!object->uses_bed_adhesion() || object->m_layers.empty())
+            continue;
         Polygons object_islands;
         for (ExPolygon &expoly : object->m_layers.front()->lslices)
             object_islands.push_back(expoly.contour);

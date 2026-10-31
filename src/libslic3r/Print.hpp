@@ -429,8 +429,14 @@ public:
     const std::vector<groupedVolumeSlices>& firstLayerObjGroups() const { return firstLayerObjSliceByGroups; }
     std::vector<groupedVolumeSlices>& firstLayerObjGroupsMod() { return firstLayerObjSliceByGroups; }
 
+    // Ordinary objects retain their existing bed settings. A rebased section
+    // uses bed adhesion only when it is an upright root at the physical bed.
+    bool uses_bed_adhesion() const {
+        return !m_segment || (m_segment->is_root() && m_segment->root_builds_up &&
+            std::abs(m_segment->slice_z_base()) < EPSILON);
+    }
     bool                         has_brim() const       {
-        return ((this->config().brim_type != btNoBrim && this->config().brim_width.value > 0.) || this->config().brim_type == btAutoBrim
+        return uses_bed_adhesion() && ((this->config().brim_type != btNoBrim && this->config().brim_width.value > 0.) || this->config().brim_type == btAutoBrim
             || (this->config().brim_type == btPainted && !this->model_object()->brim_points.empty()))
             && ! this->has_raft();
     }

@@ -462,6 +462,8 @@ static ExPolygons outer_inner_brim_area(const Print& print,
         ++extruderNo;
         for (const auto& objectWithExtruder : objPrintVec) {
             const PrintObject* object = print.get_object(objectWithExtruder.first);
+            if (!object->uses_bed_adhesion())
+                continue;
             const BrimType     brim_type = object->config().brim_type.value;
             float              brim_offset = scale_(object->config().brim_object_gap.value);
             double             flowWidth = print.brim_flow().scaled_spacing() * SCALING_FACTOR;
@@ -919,6 +921,10 @@ void make_brim(const Print& print, PrintTryCancel try_cancel, Polygons& islands_
     for (const ObjectID printObjID : print.print_object_ids()) {
         BoundingBox bbx;
         PrintObject* object = const_cast<PrintObject*>(print.get_object(printObjID));
+        if (!object->uses_bed_adhesion()) {
+            object->firstLayerObjectBrimBoundingBox = bbx;
+            continue;
+        }
         //ORCA: Use EFC-compensated outline for brim bounding box when enabled.
         const ExPolygons brim_slices = use_brim_efc_outline(*object) ?
             get_print_object_bottom_layer_expolygons(*object) : object->layers().front()->lslices;

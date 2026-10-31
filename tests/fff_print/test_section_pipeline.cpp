@@ -1,10 +1,14 @@
 #include "libslic3r/Support/SectionSupportDemand.hpp"
 #include "libslic3r/GCode/SectionFrame.hpp"
 #include "libslic3r/CutPlanes.hpp"
+#include "libslic3r/CutPlaneSegmentation.hpp"
+#include "libslic3r/ObjectID.hpp"
 #include "libslic3r/Layer.hpp"
 #include "libslic3r/ExtrusionEntityCollection.hpp"
 #include "libslic3r/Polyline.hpp"
 #include <algorithm>
+#include <map>
+#include "libslic3r/Polygon.hpp"
 #include <cmath>
 #include <vector>
 #include <catch2/catch_test_macros.hpp>
@@ -496,12 +500,13 @@ TEST_CASE("Unsupported section combinations report actionable errors and leave o
         key = "print_sequence";
         break;
     case 1:
-        config.set_deserialize_strict({{"skirt_loops", "1"}, {"skirt_height", "1"}});
-        key = "skirt_loops";
+        config.set_deserialize_strict({{"skirt_loops", "1"}, {"draft_shield", "enabled"}});
+        key = "draft_shield";
         break;
     case 2:
-        config.set_deserialize_strict({{"brim_type", "outer_only"}, {"brim_width", "3"}});
-        key = "brim_type";
+        object->cut_planes.planes.front().has_build_normal = true;
+        object->cut_planes.planes.front().build_normal = Vec3d(std::sin(Geometry::deg2rad(10.)), 0., std::cos(Geometry::deg2rad(10.)));
+        key = "enable_nonplanar";
         break;
     case 3:
         config.set_deserialize_strict("raft_layers", "1");
@@ -532,4 +537,106 @@ TEST_CASE("Unsupported section combinations report actionable errors and leave o
     config.set_deserialize_strict("enable_nonplanar", "0");
     print.apply(model, config);
     CHECK_NOTHROW(print.process());
+}
+
+TEST_CASE("Section bed adhesion stays on upright roots across tilted sections and physical copies", "[Nonplanar][SkirtBrim]")
+{
+    const int mode = GENERATE(0, 1, 2, 3); // brim, skirt, both combined, both per object
+    const bool two_copies = GENERATE(false, true);
+    const bool brim = mode != 1;
+    const bool skirt = mode != 0;
+    INFO("adhesion mode " << mode << ", copies " << (two_copies ? 2 : 1));
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"print_sequence", "by object"},
+        {"enable_prime_tower", "0"}, {"enable_support", "0"}, {"layer_height", "0.2"},
+        {"initial_layer_print_height", "0.2"}, {"elefant_foot_compensation", "0"},
+        {"sparse_infill_density", "15%"}, {"top_shell_layers", "2"}, {"bottom_shell_layers", "2"},
+        {"top_shell_thickness", "0"}, {"bottom_shell_thickness", "0"}, {"wall_loops", "2"},
+        {"brim_type", brim ? "outer_only" : "no_brim"}, {"brim_width", "3"}, {"brim_object_gap", "0.1"},
+        {"skirt_loops", skirt ? "1" : "0"}, {"skirt_height", skirt ? "3" : "0"},
+        {"skirt_type", mode == 3 ? "perobject" : "combined"}, {"skirt_distance", "6"},
+        {"min_skirt_length", "0"}, {"draft_shield", "disabled"},
+        {"use_relative_e_distances", "1"}, {"travel_speed_z", "4"},
+        {"machine_start_gcode", "G90\nM83\nG1 X0 Y0 Z2 F240\n"}, {"machine_end_gcode", "M400\n"},
+        {"before_layer_change_gcode", ""}, {"layer_change_gcode", "G92 E0\nG1 Z{layer_z}\n"},
+        {"time_lapse_gcode", ""}});
+    Print print;
+    Model model;
+    Slic3r::Test::init_print({Slic3r::Test::cube(8.)}, print, model, config);
+    ModelObject *object = model.objects.front();
+    object->instances.front()->set_offset(Vec3d(60., 60., 0.));
+    if (two_copies)
+        object->add_instance(*object->instances.front())->set_offset(Vec3d(140., 60., 0.));
+    object->cut_planes.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(4., 4., 4.);
+    plane.normal = Vec3d(std::sin(Geometry::deg2rad(10.)), 0., std::cos(Geometry::deg2rad(10.)));
+    object->cut_planes.planes.push_back(plane);
+    print.apply(model, config);
+    print.set_status_silent();
+    const auto validation = print.validate();
+    INFO(validation.string);
+    REQUIRE(validation.string.empty());
+    REQUIRE_NOTHROW(print.process());
+    CHECK_FALSE(print.get_conflict_result().has_value());
+    CHECK_THAT(area(print.first_layer_islands()) * SCALING_FACTOR * SCALING_FACTOR,
+        Catch::Matchers::WithinAbs(64. * (two_copies ? 2. : 1.), 0.05));
+    for (const auto &group : print.skirt_brim_groups())
+        for (const auto &instance : group.instances) {
+            const PrintObject *owner = print.get_object(instance.object_id);
+            REQUIRE(owner != nullptr);
+            REQUIRE(owner->segment().has_value());
+            CHECK(owner->segment()->is_root());
+        }
+    for (const PrintObject *section : print.objects()) {
+        const auto found = print.get_brimMap().find(section->id());
+        const bool has_paths = found != print.get_brimMap().end() && !found->second.empty();
+        if (section->segment()->is_root())
+            CHECK(has_paths == brim);
+        else
+            CHECK_FALSE(has_paths);
+    }
+    ScopedTemporaryFile file(".gcode");
+    GCodeProcessorResult result;
+    REQUIRE_NOTHROW(print.export_gcode(file.string(), &result));
+    REQUIRE(result.nonplanar_metadata_valid);
+    size_t brim_moves = 0, skirt_moves = 0, child_moves = 0;
+    std::map<int, size_t> brims_by_section;
+    for (const auto &move : result.moves) {
+        if (move.type != EMoveType::Extrude || move.delta_extruder <= 0.f)
+            continue;
+        REQUIRE(move.cut_segment_id >= 0);
+        REQUIRE(size_t(move.cut_segment_id) < print.objects().size());
+        const PrintObject *section = print.get_object(size_t(move.cut_segment_id));
+        if (move.extrusion_role == erBrim || move.extrusion_role == erSkirt) {
+            CHECK(section->segment()->is_root());
+            CHECK(move.position.z() >= 0.199f);
+            if (move.extrusion_role == erBrim) {
+                CHECK_THAT(move.position.z(), Catch::Matchers::WithinAbs(0.2, 0.001));
+                ++brim_moves;
+                ++brims_by_section[move.cut_segment_id];
+            } else {
+                CHECK(move.position.z() <= 0.601f);
+                ++skirt_moves;
+            }
+        } else if (!section->segment()->is_root())
+            ++child_moves;
+    }
+    CHECK((brim_moves > 0) == brim);
+    CHECK((skirt_moves > 0) == skirt);
+    CHECK(child_moves > 0);
+    if (brim)
+        CHECK(brims_by_section.size() == (two_copies ? 2 : 1));
+    CHECK_NOTHROW(print.validate_nonplanar_gcode(result));
+    if (const char *directory = std::getenv("ORCA_TEST_GCODE_ARTIFACT_DIR"); directory && *directory) {
+        boost::filesystem::create_directories(directory);
+        std::ifstream source(file.string(), std::ios::binary);
+        const std::string name = "nonplanar-bed-adhesion-" + std::to_string(mode) + "-" + (two_copies ? "2" : "1") + ".gcode";
+        std::ofstream fixture((boost::filesystem::path(directory) / name).string(), std::ios::binary);
+        REQUIRE(source.is_open());
+        REQUIRE(fixture.is_open());
+        fixture << "; Software bed-adhesion export fixture only; NOT printer-ready.\n" << source.rdbuf();
+        fixture.flush();
+        REQUIRE(fixture.good());
+    }
 }

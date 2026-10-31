@@ -4704,9 +4704,7 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
                     // another one, set first layer temperatures. This happens before the Z move
                     // is triggered, so machine has more time to reach such temperatures.
                     this->placeholder_parser().set("current_object_idx", int(finished_objects));
-                    const auto &section = object.segment();
-                    const bool starts_at_bed = !section || (section->is_root() && section->root_builds_up &&
-                        std::abs(section->slice_z_base()) < EPSILON);
+                    const bool starts_at_bed = object.uses_bed_adhesion();
                     if (starts_at_bed) {
                         const std::string printing_by_object_gcode = this->placeholder_parser_process(
                             "printing_by_object_gcode", print.config().printing_by_object_gcode.value, initial_extruder_id);
@@ -4738,10 +4736,7 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
                     m_wipe.reset_path();
                 }
                 m_cooling_buffer->set_current_extruder(initial_extruder_id, get_extruder_id(initial_extruder_id));
-                const auto &cooling_section = object.segment();
-                m_cooling_buffer->set_bed_layer_schedule(!cooling_section ||
-                    (cooling_section->is_root() && cooling_section->root_builds_up &&
-                        std::abs(cooling_section->slice_z_base()) < EPSILON));
+                m_cooling_buffer->set_bed_layer_schedule(object.uses_bed_adhesion());
                 m_cooling_buffer->reset(section_frame ? m_writer.position_for_custom_gcode() : m_writer.get_position());
                 // The belt first-layer band is tracked per object as well: if the previous
                 // object ended inside the band, this one has to open its own.
@@ -6007,6 +6002,8 @@ std::string GCode::generate_skirt(const Print &print,
         std::vector<coordf_t> &skirt_done)
 {
     
+    if (!layer.object()->uses_bed_adhesion())
+        return {};
     bool first_layer = (layer.id() == 0 && abs(layer.bottom_z()) < EPSILON);
     std::string gcode;
     // Extrude skirt at the print_z of the raft layers and normal object layers
@@ -6137,7 +6134,7 @@ std::string GCode::generate_object_brim(const Print &print, const PrintObject &o
         return gcode;
     }
 
-    if (!first_layer)
+    if (!first_layer || !object.uses_bed_adhesion())
         return {};
 
     auto emit_brim = [this](const ExtrusionEntityCollection& brim, const std::vector<ObjectInstanceID>& instances) {
@@ -6680,8 +6677,7 @@ LayerResult GCode::process_layer(
     //interface layer id is 0.
     const bool first_local_layer = layer.id() == 0 && std::abs(layer.bottom_z()) < EPSILON;
     const auto &section = layer.object()->segment();
-    const bool first_layer = first_local_layer && (!section ||
-        (section->is_root() && section->root_builds_up && std::abs(section->slice_z_base()) < EPSILON));
+    const bool first_layer = first_local_layer && layer.object()->uses_bed_adhesion();
     m_writer.set_is_first_layer(first_layer);
     unsigned int         first_extruder_id = layer_tools.extruders.front();
 
