@@ -1,7 +1,13 @@
 #include "SegmentSupportBounds.hpp"
 #include "../ClipperUtils.hpp"
 #include "../Print.hpp"
+#include "../CutPlaneSegmentation.hpp"
+#include "../Point.hpp"
+#include "../Polygon.hpp"
+#include "../libslic3r.h"
+#include <Eigen/Core>
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <utility>

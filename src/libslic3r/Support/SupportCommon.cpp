@@ -3,6 +3,7 @@
 #include "../ExtrusionEntityCollection.hpp"
 #include "../Layer.hpp"
 #include "../Print.hpp"
+#include "../PrintBase.hpp"
 #include "../Fill/FillBase.hpp"
 #include "../MutablePolygon.hpp"
 #include "../Geometry.hpp"
@@ -1367,7 +1368,8 @@ SupportGeneratorLayersPtr generate_support_layers(
     const SegmentSupportBounds section_bounds(object);
     if (section_bounds.is_active()) {
         for (SupportGeneratorLayer *layer : layers_sorted) {
-            object.print()->throw_if_canceled();
+            if (object.print()->canceled())
+                throw CanceledException();
             const Polygons valid = section_bounds.valid_region_polygon(layer->print_z, layer->height);
             layer->polygons = intersection(layer->polygons, valid);
             for (const auto *footprint : {&layer->contact_polygons, &layer->overhang_polygons, &layer->enforcer_polygons})
