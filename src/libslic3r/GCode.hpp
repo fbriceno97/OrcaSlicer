@@ -5,6 +5,7 @@
 #include "Polygon.hpp"
 #include "Config.hpp"
 #include "Print.hpp"
+#include "CutPlaneSegmentation.hpp"
 #include "libslic3r.h"
 #include "GCodeWriter.hpp"
 #include "GCode/BeltKinematics.hpp"
@@ -944,12 +945,29 @@ protected:
     void _print_first_layer_extruder_temperatures(GCodeOutputStream &file, Print &print, const std::string &gcode, unsigned int first_printing_extruder_id, bool wait);
     // On the first printing layer. This flag triggers first layer speeds.
     //BBS
-    bool    on_first_layer() const { return m_layer != nullptr && m_layer->id() == 0 && abs(m_layer->bottom_z()) < EPSILON; }
+    bool on_first_layer() const {
+        if (m_layer == nullptr || m_layer->id() != 0 || std::abs(m_layer->bottom_z()) >= EPSILON)
+            return false;
+        if (m_layer->object() == nullptr)
+            return true;
+        const auto &section = m_layer->object()->segment();
+        // Rebased child layers start at local zero above existing material.
+        // Only an upright root at the physical bed has whole-layer bed settings.
+        return !section || (section->is_root() && section->root_builds_up &&
+            std::abs(section->slice_z_base()) < EPSILON);
+    }
     // Per-point first-layer test.  On a belt printer the result depends on the
-    // supplied slicing-frame point (its height above the belt); otherwise we
-    // delegate to the legacy per-layer test.  This is the entry point used by
+    // supplied slicing-frame point (its height above the belt). Section paths
+    // use physical bed height; ordinary paths use the legacy per-layer test.  This is the entry point used by
     // per-path call sites in _extrude.
     bool on_first_layer(const Vec3d &point_slicing_mm) const {
+        if (m_layer != nullptr && m_layer->object() != nullptr && m_layer->object()->segment()) {
+            const auto &instances = m_layer->object()->instances();
+            if (instances.size() != 1)
+                return false;
+            const double world_z = (instances.front().get_slice_to_world_transform() * point_slicing_mm).z();
+            return world_z >= -EPSILON && world_z <= m_config.initial_layer_print_height.value + EPSILON;
+        }
         double h;
         if (this->belt_height_above_floor(point_slicing_mm, h))
             return h <= m_config.initial_layer_print_height.value + EPSILON;
@@ -963,6 +981,14 @@ protected:
         if (this->belt_height_above_floor(point_slicing_mm, h)) {
             const double lh = this->first_layer_band_mm();
             return h <= 0. ? 0 : int(std::floor(h / lh));
+        }
+        if (m_layer != nullptr && m_layer->object() != nullptr && m_layer->object()->segment()) {
+            if (on_first_layer(point_slicing_mm))
+                return 0;
+            const auto &section = *m_layer->object()->segment();
+            if (!section.is_root() || !section.root_builds_up || std::abs(section.slice_z_base()) >= EPSILON)
+                // A new section does not restart the bed-layer speed ramp.
+                return m_config.slow_down_layers.value > 1 ? m_config.slow_down_layers.value : 1;
         }
         return on_first_layer() ? 0 : layer_id();
     }

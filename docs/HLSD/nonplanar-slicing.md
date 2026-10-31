@@ -120,8 +120,13 @@ The `layer_z` override intersects the local layer plane with a vertical line
 through the last emitted machine XY, including plate/nozzle offsets and Z
 calibration. It does not transform an uncommanded local endpoint, which would
 also move XY on tilted sections. Non-upward planes are rejected. Macros that
-move XY before using this height, raw motion-state changes, and first-layer
-semantics still require separate integration. This scope remains behind
+move XY before using this height, raw motion-state changes, and raw
+motion parsing still require separate integration. Whole-layer bed settings are
+limited to an upright root whose slice origin is at the physical bed. Per-path
+first-layer settings use the section point's physical bed height; elevated child
+sections do not restart the bed speed ramp. Section-wide temperature/cooling,
+raft and skirt/brim scheduling still need production-export integration.
+This scope remains behind
 the export guard; frame binding alone does not establish complete motion safety
 or correct section-layer settings. This includes explicitly directed
 parts with zero rotation: their rebased layer schedules still require section

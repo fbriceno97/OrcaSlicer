@@ -33,6 +33,8 @@
 #include "libslic3r/Model.hpp"
 #include "libslic3r/Print.hpp"
 #include "libslic3r/CutPlanes.hpp"
+#include "libslic3r/CutPlaneSegmentation.hpp"
+#include "libslic3r/Layer.hpp"
 #include "libslic3r/ModelArrange.hpp"
 
 #include <boost/algorithm/string/predicate.hpp>
@@ -304,6 +306,49 @@ TEST_CASE("Section layer macros reject planes without an upward Z intersection",
     writer.set_section_transform(frame);
     CHECK_THROWS_AS(writer.machine_z_for_layer(1.), std::runtime_error);
     CHECK_THROWS_AS(writer.machine_z_for_layer(std::numeric_limits<double>::infinity()), std::runtime_error);
+}
+
+TEST_CASE("Elevated sections do not restart physical bed settings or the bed speed ramp", "[GCodeWriter][Nonplanar]")
+{
+    const bool sectioned = GENERATE(false, true);
+    const bool raised = GENERATE(false, true);
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", sectioned ? "1" : "0"}});
+    Print print;
+    Model model;
+    init_print({cube(20.)}, print, model, config);
+    ModelObject *object = model.objects.front();
+    if (raised)
+        object->instances.front()->set_offset(Vec3d(0., 0., 3.));
+    if (sectioned) {
+        object->cut_planes.enabled = true;
+        CutPlane plane;
+        plane.point = Vec3d(10., 10., 10.);
+        object->cut_planes.planes.push_back(plane);
+    }
+    print.apply(model, config);
+    struct BedGCode : GCode {
+        BedGCode()
+        {
+            m_config.initial_layer_print_height.value = 0.2;
+            m_config.slow_down_layers.value = 5;
+        }
+        void select_layer(const Layer *layer) { m_layer = layer; }
+        bool bed_layer() const { return on_first_layer(); }
+        bool bed_point(const Vec3d &point) const { return on_first_layer(point); }
+        int ramp_layer(const Vec3d &point) const { return effective_layer_index_for_point(point); }
+    } generator;
+    for (PrintObject *section : print.objects()) {
+        REQUIRE(section->layers().empty());
+        const bool bed = !sectioned || (!raised && section->segment()->is_root());
+        for (int id : {0, 1}) {
+            const double z = 0.2 * (id + 1);
+            generator.select_layer(section->add_layer(id, 0.2, z, z - 0.1));
+            CHECK(generator.bed_layer() == (bed && id == 0));
+            CHECK(generator.bed_point(Vec3d(0., 0., z)) == (bed && id == 0));
+            CHECK(generator.ramp_layer(Vec3d(0., 0., z)) == (bed ? id : 5));
+        }
+    }
 }
 
 TEST_CASE("Section acceleration bounds print and travel including inherited settings", "[GCodeWriter][Nonplanar]")
