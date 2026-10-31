@@ -237,6 +237,7 @@ TEST_CASE("Section macro clearance uses deposited machine height without mutatin
     DynamicConfig overrides;
     overrides.set_key_value("max_layer_z", new ConfigOptionFloat(1.));
     const std::string output = generator.placeholder_parser_process("machine_end_gcode", "G1 Z{max_layer_z + 3}\n", 0, &overrides);
+    INFO(output);
     REQUIRE(output.find("!!!!!") == std::string::npos);
     GCodeReader reader;
     float z = -1.f;

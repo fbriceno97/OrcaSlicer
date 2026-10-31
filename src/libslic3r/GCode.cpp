@@ -5348,7 +5348,7 @@ PlaceholderParserIntegration &ppi = m_placeholder_parser_integration;
         DynamicConfig physical_override;
         const DynamicConfig *effective_override = config_override;
         if (m_writer.section_motion_limits_enabled() && config_override && config_override->has("max_layer_z")) {
-            physical_override.apply(*config_override);
+            physical_override = *config_override;
             // Raw macro Z commands bypass writer calibration. Supply the full
             // deposited machine height, including calibration, not local layer Z.
             physical_override.set_key_value("max_layer_z", new ConfigOptionFloat(

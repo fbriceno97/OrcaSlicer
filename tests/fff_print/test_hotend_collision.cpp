@@ -142,12 +142,31 @@ TEST_CASE("Invalid metadata and positions cannot be reported as collision-free",
     CHECK_THROWS_AS(check_hotend_collisions(result, HotendCollisionParams{}), std::invalid_argument);
 }
 
-TEST_CASE("An oversized collision grid fails instead of silently approving clearance", "[HotendCollision]")
+TEST_CASE("Collision checks reject moves beyond the supported sampling budget", "[HotendCollision]")
 {
     GCodeProcessorResult result;
     sample_sections(result, false, false);
-    result.moves.back().position = Vec3f(8000.f, 8000.f, 0.f);
-    CHECK_THROWS_AS(check_hotend_collisions(result, HotendCollisionParams{}), std::runtime_error);
+    result.moves.back().position = Vec3f(2000000.f, 2000000.f, 0.f);
+    CHECK_THROWS_AS(check_hotend_collisions(result, HotendCollisionParams{}), std::invalid_argument);
+}
+
+TEST_CASE("Sparse distant travel preserves upright collision detection without a dense grid", "[HotendCollision]")
+{
+    const bool clear = GENERATE(false, true);
+    GCodeProcessorResult result;
+    sample_sections(result, false, false);
+    auto travel = result.moves.back();
+    result.moves.pop_back();
+    travel.position = Vec3f(8000.f, 8000.f, 30.f);
+    travel.gcode_id = 3;
+    result.moves.push_back(travel);
+    travel.position = Vec3f(10.f, 0.f, 30.f);
+    travel.gcode_id = 4;
+    result.moves.push_back(travel);
+    travel.position = Vec3f(clear ? 30.f : 0.f, 0.f, 0.f);
+    travel.gcode_id = 5;
+    result.moves.push_back(travel);
+    CHECK(check_hotend_collisions(result, HotendCollisionParams{}).has_value() == !clear);
 }
 
 TEST_CASE("The export gate rejects colliding sections and disabled envelopes while preserving default-off behavior", "[HotendCollision][Print]")

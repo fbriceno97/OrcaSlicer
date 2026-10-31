@@ -1252,7 +1252,7 @@ std::string GCodeWriter::travel_to_xyz(const Vec3d &point, const std::string &co
             }
         }
         m_pos = dest_point;
-    remember_section_position();
+        remember_section_position();
         this->set_current_position_clear(true);
         return slop_move + xy_z_move;
     }
@@ -1299,6 +1299,7 @@ std::string GCodeWriter::travel_to_xyz(const Vec3d &point, const std::string &co
     }
 
     m_pos = dest_point;
+    remember_section_position();
     this->set_current_position_clear(true);
     return out_string;
 }
