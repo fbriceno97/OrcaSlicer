@@ -7010,6 +7010,18 @@ int Print::load_cached_data(const std::string& directory)
     return ret;
 }
 
+Transform3d PrintInstance::get_slice_to_world_transform() const
+{
+    // trafo() already includes instance scaling, mirroring and shrinkage. Undo
+    // only the slicing frame, then restore the XY placement removed by apply().
+    // Using the full model-instance transform here would apply shrinkage twice
+    // or discard it, depending on which coordinates the caller starts with.
+    Transform3d result = print_object->trafo() * print_object->trafo_sliced().inverse();
+    const Point placement = shift - print_object->center_offset();
+    result.pretranslate(Vec3d(unscale<double>(placement.x()), unscale<double>(placement.y()), 0.));
+    return result;
+}
+
 BoundingBoxf3 PrintInstance::get_bounding_box() const {
     return print_object->model_object()->instance_bounding_box(*model_instance, false);
 }

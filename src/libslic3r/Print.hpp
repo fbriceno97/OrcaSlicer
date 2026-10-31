@@ -246,6 +246,8 @@ struct PrintInstance
 	Point 				 shift;
     
     BoundingBoxf3   get_bounding_box() const;
+    // Slice coordinates to this copy's placed world geometry, before plate/nozzle calibration.
+    Transform3d get_slice_to_world_transform() const;
     Polygon get_convex_hull_2d();
     // SoftFever
     // 

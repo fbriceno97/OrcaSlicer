@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <initializer_list>
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/BoundingBox.hpp"
 #include "libslic3r/Point.hpp"
@@ -31,6 +32,7 @@
 #include "libslic3r/GCode.hpp"
 #include "libslic3r/Model.hpp"
 #include "libslic3r/Print.hpp"
+#include "libslic3r/CutPlanes.hpp"
 #include "libslic3r/ModelArrange.hpp"
 
 #include <boost/algorithm/string/predicate.hpp>
@@ -53,6 +55,74 @@
 
 using namespace Slic3r;
 using namespace Slic3r::Test;
+
+TEST_CASE("Section XYZ motion restores each scaled and mirrored copy without rotating calibration", "[GCodeWriter][Nonplanar]")
+{
+    const bool mirrored = GENERATE(false, true);
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"filament_shrink", "98"},
+        {"filament_shrinkage_compensation_z", "97"}});
+    Print print;
+    Model model;
+    init_print({cube(20.)}, print, model, config);
+    ModelObject *object = model.objects.front();
+    object->instances.front()->set_offset(Vec3d(120., 230., 0.));
+    object->instances.front()->set_rotation(Z, 0.4);
+    object->instances.front()->set_scaling_factor(Vec3d(1.2, 0.8, 1.1));
+    object->instances.front()->set_mirror(Vec3d(mirrored ? -1. : 1., 1., 1.));
+    object->add_instance(*object->instances.front())->set_offset(Vec3d(170., 290., 0.));
+    object->cut_planes.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(10., 10., 10.);
+    plane.normal = Vec3d(0.3, 0.1, 1.).normalized();
+    object->cut_planes.planes.push_back(plane);
+    print.apply(model, config);
+    REQUIRE(print.objects().size() == 4);
+
+    PrintConfig writer_config;
+    writer_config.extruder_offset.values = {Vec2d(3., 5.)};
+    writer_config.z_offset.value = 0.2;
+    const Vec3d plate(100., 200., 0.);
+    const Vec3d calibration(-3., -5., 0.2);
+    for (const PrintObject *section : print.objects()) {
+        REQUIRE(section->segment().has_value());
+        REQUIRE(section->instances().size() == 1);
+        const PrintInstance &instance = section->instances().front();
+        const Transform3d to_world = instance.get_slice_to_world_transform();
+        CHECK_THAT(to_world.linear().determinant(), Catch::Matchers::WithinAbs(1., 1e-9));
+        CHECK_THAT((to_world.linear().transpose() * to_world.linear() - Matrix3d::Identity()).norm(),
+            Catch::Matchers::WithinAbs(0., 1e-9));
+
+        GCodeWriter writer;
+        writer.apply_print_config(writer_config);
+        writer.set_xy_offset(plate.x(), plate.y());
+        writer.set_extruders({0});
+        writer.set_extruder(0);
+        // point_to_gcode() adds the instance's origin before handing XY to
+        // the writer; it must be removed before undoing the slicing frame.
+        const Vec3d origin(unscale<double>(instance.shift.x()), unscale<double>(instance.shift.y()), 0.);
+        writer.set_section_transform(to_world * Eigen::Translation3d(-origin));
+        for (const Vec3d &local : {Vec3d(2., 3., 4.), Vec3d(15., 17., 18.)}) {
+            const Vec3d sliced = section->trafo_sliced() * local;
+            // Independently place the original model point, then compensate
+            // its dimensions, keeping the copy's XY placement fixed.
+            const Vec3d offset = instance.model_instance->get_offset();
+            Vec3d expected = instance.model_instance->get_matrix() * local;
+            expected.x() = offset.x() + (expected.x() - offset.x()) * 100. / 98.;
+            expected.y() = offset.y() + (expected.y() - offset.y()) * 100. / 98.;
+            expected.z() *= 100. / 97.;
+            expected += calibration - plate;
+            GCodeReader reader;
+            Vec3d emitted = Vec3d::Zero();
+            reader.parse_buffer(writer.travel_to_xyz(sliced + origin + calibration),
+                [&](GCodeReader &state, const GCodeReader::GCodeLine &line) {
+                    if (line.cmd_is("G1"))
+                        emitted = Vec3d(line.new_X(state), line.new_Y(state), line.new_Z(state));
+                });
+            CHECK_THAT((emitted - expected).norm(), Catch::Matchers::WithinAbs(0., 0.002));
+        }
+    }
+}
 
 TEST_CASE("Section motion leaves physical calibration outside the build-frame rotation", "[GCodeWriter][Nonplanar]")
 {

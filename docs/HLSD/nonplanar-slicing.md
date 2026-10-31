@@ -30,6 +30,12 @@ already include instance shrinkage compensation; layer scheduling does not apply
 that compensation a second time. A sunk root building vertically keeps its base
 at zero so buried material is not lifted above the bed by rebasing.
 
+`PrintInstance::get_slice_to_world_transform()` reverses this slicing frame and
+restores the copy's XY placement. Scaling, mirroring and shrinkage remain in the
+geometry; the section-to-world map is rigid. Writer input also contains the
+current G-code origin, which must be subtracted before applying this map. Plate
+and nozzle offsets and Z calibration are physical corrections applied afterward.
+
 A model-space bound `n*x <= d` becomes `n_s*s <= d + n_s*t`, where
 `n_s = inverse(A).transpose()*n`. At each slice height this is an XY half-plane.
 Horizontal bounds either keep or discard the entire slice. Bed bounds include
