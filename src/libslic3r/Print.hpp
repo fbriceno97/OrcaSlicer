@@ -55,6 +55,7 @@
 #include "calib.hpp"
 
 namespace Slic3r {
+namespace Test { struct PrintPipelineAccess; }
 
 class SlicingErrors;
 
@@ -1474,6 +1475,11 @@ protected:
     bool                invalidate_step(PrintStep step);
 
 private:
+    // Keep guarded entry points intact while integration tests exercise the
+    // production pipeline. No unchecked runtime entry point is exposed.
+    friend struct Test::PrintPipelineAccess;
+    void process_impl(long long *time_cost_with_cache, bool use_cache);
+
     //BBS
     static StringObjectException check_multi_filament_valid(const Print &print);
 

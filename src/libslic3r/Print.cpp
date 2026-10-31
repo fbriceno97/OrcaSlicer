@@ -3221,6 +3221,11 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
 {
     if (unsupported_nonplanar_object(*this) != nullptr)
         throw Slic3r::SlicingError(unsupported_nonplanar_message());
+    process_impl(time_cost_with_cache, use_cache);
+}
+
+void Print::process_impl(long long *time_cost_with_cache, bool use_cache)
+{
     long long start_time = 0, end_time = 0;
     if (time_cost_with_cache)
         *time_cost_with_cache = 0;

@@ -8,6 +8,7 @@
 #include <cmath>
 #include <vector>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
@@ -40,6 +41,12 @@
 #include <string>
 #include <utility>
 #include <cstddef>
+
+namespace Slic3r::Test {
+struct PrintPipelineAccess {
+    static void process(Print &print) { print.process_impl(nullptr, false); }
+};
+}
 
 using namespace Slic3r;
 
@@ -314,6 +321,76 @@ TEST_CASE("Production export preserves section order and world heights for a per
         REQUIRE(source.is_open());
         REQUIRE(fixture.is_open());
         fixture << "; Software production-export fixture only; NOT printer-ready.\n" << source.rdbuf();
+        fixture.flush();
+        REQUIRE(fixture.good());
+    }
+}
+
+TEST_CASE("Full section slicing exports solid surfaces and infill through upright and tilted frames", "[Nonplanar][GCode]")
+{
+    const bool tilted = GENERATE(false, true);
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"print_sequence", "by object"},
+        {"enable_support", "0"}, {"layer_height", "0.2"}, {"initial_layer_print_height", "0.2"},
+        {"sparse_infill_density", "15%"}, {"top_shell_layers", "3"}, {"bottom_shell_layers", "3"},
+        {"top_shell_thickness", "0"}, {"bottom_shell_thickness", "0"},
+        {"wall_loops", "2"}, {"skirt_loops", "0"}, {"brim_type", "no_brim"},
+        {"use_relative_e_distances", "1"}, {"travel_speed_z", "4"},
+        {"machine_start_gcode", "G90\nM83\nG1 X0 Y0 Z2 F240\n"},
+        {"machine_end_gcode", "M400\n"}, {"before_layer_change_gcode", ""},
+        {"layer_change_gcode", "G1 Z{layer_z}\n"}, {"time_lapse_gcode", ""}});
+    Print print;
+    Model model;
+    Slic3r::Test::init_print({Slic3r::Test::cube(20.)}, print, model, config);
+    ModelObject *object = model.objects.front();
+    object->instances.front()->set_offset(Vec3d(60., 60., 0.));
+    object->cut_planes.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(10., 10., 10.);
+    if (tilted)
+        plane.normal = Vec3d(std::sin(Geometry::deg2rad(10.)), 0., std::cos(Geometry::deg2rad(10.)));
+    object->cut_planes.planes.push_back(plane);
+    print.apply(model, config);
+    print.set_status_silent();
+    REQUIRE_THROWS_AS(print.process(), SlicingError);
+    REQUIRE_NOTHROW(Slic3r::Test::PrintPipelineAccess::process(print));
+    REQUIRE(print.is_step_done(posInfill));
+    REQUIRE(print.is_step_done(posSupportMaterial));
+    ScopedTemporaryFile file(".gcode");
+    GCodeProcessorResult result;
+    GCode generator;
+    REQUIRE_NOTHROW(generator.do_export(&print, file.string().c_str(), &result));
+    REQUIRE(result.nonplanar_metadata_valid);
+    size_t root_moves = 0, child_moves = 0, infill_moves = 0;
+    bool child_started = false;
+    for (const auto &move : result.moves) {
+        if (move.type != EMoveType::Extrude || move.delta_extruder <= 0.f)
+            continue;
+        if (move.cut_segment_id == 0) {
+            CHECK_FALSE(child_started);
+            ++root_moves;
+        } else if (move.cut_segment_id == 1) {
+            child_started = true;
+            REQUIRE(move.tool_axis_id < result.tool_axes.size());
+            CHECK_THAT((result.tool_axes[move.tool_axis_id].cast<double>() - plane.normal).norm(),
+                Catch::Matchers::WithinAbs(0., 1e-5));
+            ++child_moves;
+        }
+        if (is_infill(move.extrusion_role))
+            ++infill_moves;
+    }
+    CHECK(root_moves > 0);
+    CHECK(child_moves > 0);
+    CHECK(infill_moves > 0);
+    CHECK_NOTHROW(print.validate_nonplanar_gcode(result));
+    if (const char *directory = std::getenv("ORCA_TEST_GCODE_ARTIFACT_DIR"); directory && *directory) {
+        boost::filesystem::create_directories(directory);
+        std::ifstream source(file.string(), std::ios::binary);
+        const char *name = tilted ? "nonplanar-production-solid-tilted.gcode" : "nonplanar-production-solid-upright.gcode";
+        std::ofstream fixture((boost::filesystem::path(directory) / name).string(), std::ios::binary);
+        REQUIRE(source.is_open());
+        REQUIRE(fixture.is_open());
+        fixture << "; Software full-pipeline export fixture only; NOT printer-ready.\n" << source.rdbuf();
         fixture.flush();
         REQUIRE(fixture.good());
     }
