@@ -176,6 +176,8 @@ public:
     // Generated motion only. The rigid map excludes physical plate/nozzle/Z
     // calibration, which remains in machine coordinates after the rotation.
     void set_section_transform(const std::optional<Transform3d> &transform);
+    // Keep physical limits active for generated global transitions between frames.
+    void set_section_motion_limits(bool enabled) { m_section_motion_limits = enabled; }
     bool has_section_transform() const { return m_section_transform.has_value(); }
     bool supports_arc_moves() const { return !m_section_transform && m_kinematics->supports_arc_moves(); }
 
@@ -238,6 +240,7 @@ protected:
     // historical behaviour exactly.
     std::unique_ptr<MachineKinematics> m_kinematics;
     std::optional<Transform3d> m_section_transform;
+    bool m_section_motion_limits {false};
     std::vector<Vec2d> m_section_tool_offsets;
     double m_section_z_offset {0.};
     double m_section_machine_speed_z {0.};

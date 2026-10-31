@@ -66,7 +66,7 @@ bool GCodeWriter::must_skip_lift_now() const
 
 double GCodeWriter::section_motion_speed(double requested) const
 {
-    if (!m_section_transform)
+    if (!m_section_transform && !m_section_motion_limits)
         return requested;
     double limit = config.travel_speed_z.get_at(m_cached_extruder_idx);
     if (!std::isfinite(requested) || requested <= 0. || !std::isfinite(limit) || limit < 0. ||
@@ -81,7 +81,7 @@ double GCodeWriter::section_motion_speed(double requested) const
 
 unsigned int GCodeWriter::section_motion_acceleration(unsigned int requested) const
 {
-    if (!m_section_transform)
+    if (!m_section_transform && !m_section_motion_limits)
         return requested;
     if (!std::isfinite(m_section_machine_acceleration_z) || m_section_machine_acceleration_z < 1.)
         throw std::invalid_argument("Section motion requires a configured physical Z acceleration limit");
@@ -221,6 +221,7 @@ bool GCodeWriter::supports_separate_travel_acceleration(GCodeFlavor flavor)
 
 void GCodeWriter::apply_print_config(const PrintConfig &print_config)
 {
+    m_section_motion_limits = false;
     this->config.apply(print_config, true);
     m_section_tool_offsets = print_config.extruder_offset.values;
     m_section_z_offset = print_config.z_offset.value;
@@ -997,7 +998,7 @@ void GCodeWriter::set_speed(std::string &out, double F, const std::string &comme
 {
     assert(F > 0.);
     assert(F < 100000.);
-    if (m_section_transform)
+    if (m_section_transform || m_section_motion_limits)
         F = section_motion_speed(F / 60.) * 60.;
     m_current_speed = F;
     GCodeG1Formatter w;

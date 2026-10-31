@@ -99,15 +99,17 @@ Generated section motion uses a conservative scalar feed cap: the smaller positi
 and machine Z speed limits. Zero Z travel speed uses the machine limit; if both
 are unset, generated section motion is rejected. The cap applies to mapped XY, XYZ and Z
 travel, extrusion feed commands and the cached speed used for role-based wipes,
-because each XYZ motion can contain physical Z motion. Closing a frame restores
-ordinary feed behavior. This deliberately conservative cap does not replace
+because each XYZ motion can contain physical Z motion. Section-containing exports
+keep these physical limits active through generated global transitions, including
+when no geometric frame is bound. Export cleanup clears the mode; ordinary prints
+retain their existing feed behavior. This deliberately conservative cap does not replace
 collision checks. Print and travel acceleration are bounded by the configured
 machine Z acceleration, rounded downward to the writer's integer command format.
 Zero/inherited acceleration selects that bound inside a section. Sequential
 section entry establishes bounded modal acceleration before any section move;
 missing or sub-unit limits are rejected. Direction-aware feed optimization,
-global transitions and raw custom macros still require integration before section
-export can be enabled.
+transition route planning and raw custom macros still require integration before
+section export can be enabled.
 
 G-code processing separately retains section IDs and normalized build directions.
 Reloading moves also reloads their direction palette. Annotated section travel

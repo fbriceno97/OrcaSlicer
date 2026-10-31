@@ -188,7 +188,8 @@ TEST_CASE("Section XYZ motion restores each scaled and mirrored copy without rot
 
 TEST_CASE("Section acceleration bounds print and travel including inherited settings", "[GCodeWriter][Nonplanar]")
 {
-    const bool section = GENERATE(false, true);
+    const int context = GENERATE(0, 1, 2); // ordinary, section frame, global section transition
+    const bool section = context != 0;
     const bool travel = GENERATE(false, true);
     const unsigned int requested = GENERATE(0U, 50U, 5000U);
     PrintConfig config;
@@ -200,7 +201,8 @@ TEST_CASE("Section acceleration bounds print and travel including inherited sett
     writer.apply_print_config(config);
     writer.set_extruders({0});
     writer.set_extruder(0);
-    if (section)
+    writer.set_section_motion_limits(context == 2);
+    if (context == 1)
         writer.set_section_transform(Transform3d::Identity());
     const std::string output = travel ? writer.set_travel_acceleration(requested) : writer.set_print_acceleration(requested);
     const unsigned int expected = section ? (requested == 0 ? 120U : std::min(requested, 120U)) : requested;
@@ -216,6 +218,7 @@ TEST_CASE("Section acceleration bounds print and travel including inherited sett
     });
     CHECK(commands == (expected > 0 ? 1 : 0));
     writer.set_section_transform(std::nullopt);
+    writer.set_section_motion_limits(false);
     CHECK_NOTHROW(writer.set_print_acceleration(5000));
 }
 
@@ -255,7 +258,8 @@ TEST_CASE("Section acceleration rejects an unset physical Z limit", "[GCodeWrite
 
 TEST_CASE("Section travel respects configured physical Z speed on every mapped axis", "[GCodeWriter][Nonplanar]")
 {
-    const bool section = GENERATE(false, true);
+    const int context = GENERATE(0, 1, 2); // ordinary, section frame, global section transition
+    const bool section = context != 0;
     const double z_speed = GENERATE(0., 4., 20.);
     const int travel = GENERATE(0, 1, 2);
     PrintConfig config;
@@ -266,9 +270,10 @@ TEST_CASE("Section travel respects configured physical Z speed on every mapped a
     writer.apply_print_config(config);
     writer.set_extruders({0});
     writer.set_extruder(0);
+    writer.set_section_motion_limits(context == 2);
     writer.set_is_first_layer(false);
     writer.set_current_position_clear(true);
-    if (section) {
+    if (context == 1) {
         Transform3d frame = Transform3d::Identity();
         frame.rotate(Eigen::AngleAxisd(Geometry::deg2rad(45.), Vec3d::UnitX()));
         writer.set_section_transform(frame);
@@ -290,7 +295,8 @@ TEST_CASE("Section travel respects configured physical Z speed on every mapped a
 
 TEST_CASE("Section extrusion feed and cached wipe speed share the physical Z cap", "[GCodeWriter][Nonplanar]")
 {
-    const bool section = GENERATE(false, true);
+    const int context = GENERATE(0, 1, 2); // ordinary, section frame, global section transition
+    const bool section = context != 0;
     const double requested = GENERATE(2., 200.);
     PrintConfig config;
     config.travel_speed_z.values = {4.};
@@ -299,7 +305,8 @@ TEST_CASE("Section extrusion feed and cached wipe speed share the physical Z cap
     writer.apply_print_config(config);
     writer.set_extruders({0});
     writer.set_extruder(0);
-    if (section) {
+    writer.set_section_motion_limits(context == 2);
+    if (context == 1) {
         Transform3d frame = Transform3d::Identity();
         frame.rotate(Eigen::AngleAxisd(Geometry::deg2rad(45.), Vec3d::UnitX()));
         writer.set_section_transform(frame);
@@ -317,6 +324,7 @@ TEST_CASE("Section extrusion feed and cached wipe speed share the physical Z cap
     });
     CHECK(feedrates == 1);
     writer.set_section_transform(std::nullopt);
+    writer.set_section_motion_limits(false);
     writer.set_speed(requested * 60.);
     CHECK_THAT(writer.get_current_speed(), Catch::Matchers::WithinAbs(requested * 60., 1e-6));
 }

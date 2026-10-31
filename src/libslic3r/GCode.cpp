@@ -3491,6 +3491,12 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
 
     m_enable_cooling_markers = true;
     this->apply_print_config(print.config());
+    const auto print_objects = print.objects();
+    const bool has_sections = std::any_of(print_objects.begin(), print_objects.end(), [](const PrintObject *object) {
+        return object->segment().has_value();
+    });
+    m_writer.set_section_motion_limits(has_sections);
+    ScopeGuard reset_motion_limits([this]() { m_writer.set_section_motion_limits(false); });
     m_config.apply(print.default_object_config());
     m_config.apply(print.default_region_config());
 
@@ -4548,10 +4554,6 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
 
         // Do all objects for each layer.
         if (print.config().print_sequence == PrintSequence::ByObject && !has_wipe_tower) {
-            const auto objects = print.objects();
-            const bool has_sections = std::any_of(objects.begin(), objects.end(), [](const PrintObject *object) {
-                return object->segment().has_value();
-            });
             if (has_sections && m_fan_mover)
                 file.write(m_fan_mover->process_gcode("", true));
             if (has_sections)
