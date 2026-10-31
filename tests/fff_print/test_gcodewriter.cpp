@@ -249,6 +249,63 @@ TEST_CASE("Section macro clearance uses deposited machine height without mutatin
     CHECK(overrides.opt_float("max_layer_z") == 1.);
 }
 
+TEST_CASE("Section layer macros intersect the physical layer plane at emitted XY", "[GCodeWriter][Nonplanar]")
+{
+    const int context = GENERATE(0, 1, 2); // ordinary, tilted section, global transition
+    const bool shifted_plate = GENERATE(false, true);
+    struct LayerGCode : GCode {
+        LayerGCode()
+        {
+            PrintConfig config;
+            config.z_offset.value = 0.2;
+            config.extruder_offset.values = {Vec2d(3., 5.)};
+            m_config.apply(config, true);
+            m_writer.apply_print_config(config);
+            m_writer.set_extruders({0});
+            m_writer.set_extruder(0);
+            m_placeholder_parser_integration.init(m_writer);
+        }
+    } generator;
+    const double plate_x = shifted_plate ? 100. : 0.;
+    generator.writer().set_xy_offset(plate_x, shifted_plate ? 200. : 0.);
+    if (context == 1) {
+        Transform3d frame = Transform3d::Identity();
+        frame.rotate(Eigen::AngleAxisd(Geometry::deg2rad(30.), Vec3d::UnitY()));
+        frame.translation() = Vec3d(5., 7., 10.);
+        generator.writer().set_section_transform(frame);
+    } else if (context == 2)
+        generator.writer().set_section_motion_limits(true);
+    generator.writer().set_position_from_custom_gcode(Vec3d(4. - plate_x, 10., 20.));
+    generator.writer().get_position().z() += 50.; // pending local plan is not an emitted pose
+    DynamicConfig overrides;
+    overrides.set_key_value("layer_z", new ConfigOptionFloat(1.8));
+    const std::string output = generator.placeholder_parser_process("layer_change_gcode", "G1 Z{layer_z}\n", 0, &overrides);
+    INFO(output);
+    REQUIRE(output.find("!!!!!") == std::string::npos);
+    GCodeReader reader;
+    double z = -1.;
+    reader.parse_buffer(output, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
+        if (line.cmd_is("G1") && line.has(Z))
+            z = line.z();
+    });
+    const double angle = Geometry::deg2rad(30.);
+    const double expected = context == 1 ? 10.2 + 1.8 / std::cos(angle) - 2. * std::tan(angle)
+        : (context == 2 ? 2. : 1.8);
+    CHECK_THAT(z, Catch::Matchers::WithinAbs(expected, 0.001));
+    CHECK_THAT(overrides.opt_float("layer_z"), Catch::Matchers::WithinAbs(1.8, 1e-12));
+}
+
+TEST_CASE("Section layer macros reject planes without an upward Z intersection", "[GCodeWriter][Nonplanar]")
+{
+    GCodeWriter writer;
+    writer.apply_print_config(PrintConfig());
+    Transform3d frame = Transform3d::Identity();
+    frame.rotate(Eigen::AngleAxisd(Geometry::deg2rad(90.), Vec3d::UnitY()));
+    writer.set_section_transform(frame);
+    CHECK_THROWS_AS(writer.machine_z_for_layer(1.), std::runtime_error);
+    CHECK_THROWS_AS(writer.machine_z_for_layer(std::numeric_limits<double>::infinity()), std::runtime_error);
+}
+
 TEST_CASE("Section acceleration bounds print and travel including inherited settings", "[GCodeWriter][Nonplanar]")
 {
     const int context = GENERATE(0, 1, 2); // ordinary, section frame, global section transition

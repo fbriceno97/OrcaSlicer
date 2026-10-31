@@ -125,6 +125,8 @@ public:
     // Section exports exchange raw macro positions in machine coordinates,
     // including between frames. Ordinary exports retain their existing convention.
     Vec3d       position_for_custom_gcode() const;
+    // Machine Z where the local layer plane crosses the current emitted XY.
+    double      machine_z_for_layer(double layer_z) const;
     void        set_position_from_custom_gcode(const Vec3d &position);
     double      get_zhop() const { return m_lifted; }
 

@@ -160,6 +160,25 @@ Vec3d GCodeWriter::position_for_custom_gcode() const
     return map_section_point(m_pos - plate);
 }
 
+double GCodeWriter::machine_z_for_layer(double layer_z) const
+{
+    if (!section_motion_limits_enabled())
+        return layer_z;
+    if (!std::isfinite(layer_z))
+        throw std::runtime_error("Section macro layer height must be finite");
+    if (!m_section_transform)
+        return layer_z + m_section_z_offset;
+    const Vec3d normal = m_section_transform->linear().col(2);
+    if (normal.z() <= EPSILON)
+        throw std::runtime_error("Section macro layer plane must face upwards");
+    const Vec3d physical = position_for_custom_gcode();
+    const Vec3d plane_origin = m_section_transform->translation() + section_physical_offset();
+    // A raw Z command holds machine XY fixed. Transforming a planned local
+    // endpoint instead would also move XY when the section is tilted.
+    return (layer_z + normal.dot(plane_origin) - normal.x() * physical.x() -
+        normal.y() * physical.y()) / normal.z();
+}
+
 void GCodeWriter::set_position_from_custom_gcode(const Vec3d &position)
 {
     if (!m_section_transform) {

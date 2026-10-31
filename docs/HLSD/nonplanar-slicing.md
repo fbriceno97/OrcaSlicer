@@ -116,8 +116,12 @@ pose the printer has not reached. The `max_layer_z` macro override uses the high
 machine endpoint, including Z calibration, seeded from processed startup material.
 Descending deposition includes its starting height; planned positions, travel and
 retracting wipes do not raise this maximum. Caller override data stays unchanged.
-Other layer-height placeholders and raw macro motion still require separate
-section integration. This scope remains behind
+The `layer_z` override intersects the local layer plane with a vertical line
+through the last emitted machine XY, including plate/nozzle offsets and Z
+calibration. It does not transform an uncommanded local endpoint, which would
+also move XY on tilted sections. Non-upward planes are rejected. Macros that
+move XY before using this height, raw motion-state changes, and first-layer
+semantics still require separate integration. This scope remains behind
 the export guard; frame binding alone does not establish complete motion safety
 or correct section-layer settings. This includes explicitly directed
 parts with zero rotation: their rebased layer schedules still require section
