@@ -105,6 +105,7 @@ TEST_CASE("Section XYZ motion restores each scaled and mirrored copy without rot
     PrintConfig writer_config;
     writer_config.extruder_offset.values = {Vec2d(3., 5.)};
     writer_config.z_offset.value = 0.2;
+    writer_config.z_hop.values = {0.4};
     const Vec3d plate(100., 200., 0.);
     const Vec3d calibration(-3., -5., 0.2);
     int section_id = 0;
@@ -129,6 +130,11 @@ TEST_CASE("Section XYZ motion restores each scaled and mirrored copy without rot
         generator.set_origin(origin.head<2>());
         std::string program = "G90\nT0\n" + begin_section_frame(instance, generator.origin(), writer);
         CHECK_THROWS_AS(begin_section_frame(instance, generator.origin(), writer), std::logic_error);
+        REQUIRE_FALSE(writer.is_current_position_clear());
+        // Match change_layer(): this Z is planned, not an emitted position.
+        writer.get_position().z() = 2.;
+        CHECK(writer.eager_lift(LiftType::NormalLift).empty());
+        CHECK(writer.unlift().empty());
         for (const Vec3d &local : {Vec3d(2., 3., 4.), Vec3d(15., 17., 18.)}) {
             const Vec3d sliced = section->trafo_sliced() * local;
             // Independently place the original model point, then compensate
@@ -144,6 +150,7 @@ TEST_CASE("Section XYZ motion restores each scaled and mirrored copy without rot
             const Vec2d xy = generator.point_to_gcode(Point::new_scale(sliced.x(), sliced.y()));
             const std::string motion = writer.travel_to_xyz(Vec3d(xy.x(), xy.y(), sliced.z() + writer_config.z_offset.value));
             program += motion;
+            CHECK(writer.is_current_position_clear());
             reader.parse_buffer(motion,
                 [&](GCodeReader &state, const GCodeReader::GCodeLine &line) {
                     if (line.cmd_is("G1"))

@@ -48,6 +48,9 @@ std::string begin_section_frame(const PrintInstance &instance, const Vec2d &orig
     // Compose out the XY origin already added by point_to_gcode(). Printer
     // plate/nozzle calibration stays outside this rigid geometric transform.
     writer.set_section_transform(to_world * Eigen::Translation3d(-origin.x(), -origin.y(), 0.));
+    // Layer setup will replace logical Z before the first absolute XYZ move.
+    // Do not lift through that planned pose as if it had already been emitted.
+    writer.set_current_position_clear(false);
     return metadata.str();
 }
 
