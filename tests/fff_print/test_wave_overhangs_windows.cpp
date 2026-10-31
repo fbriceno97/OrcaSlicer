@@ -1,7 +1,7 @@
-// Windows x64 prototype acceptance test for the first Unlayered wave-engine port.
-// Intentionally excludes Unlayered's unported floor, temperature, and nonplanar options.
+// Windows x64 wave-engine and production-export acceptance tests.
 // AGPL-3.0-or-later attribution is preserved in WaveOverhangs source files.
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_message.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -21,6 +21,12 @@
 #include "libslic3r/Print.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Config.hpp"
+#include "libslic3r/CutPlanes.hpp"
+#include "libslic3r/CutPlaneSegmentation.hpp"
+#include "libslic3r/Geometry.hpp"
+#include "libslic3r/Model.hpp"
+#include "libslic3r/Point.hpp"
+#include "libslic3r/GCode/GCodeProcessor.hpp"
 #include "libslic3r/TriangleMesh.hpp"
 #include "test_helpers.hpp"
 using namespace Slic3r;
@@ -34,7 +40,7 @@ void preserve_gcode_fixture(const std::string &name, const std::string &gcode)
     boost::filesystem::create_directories(directory);
     std::ofstream output((boost::filesystem::path(directory) / name).string(), std::ios::binary);
     REQUIRE(output.is_open());
-    output << "; Software regression fixture; physical printer validation is separate.\n" << gcode;
+    output << "; Software regression fixture only; NOT printer-ready. Physical validation is separate.\n" << gcode;
     output.flush();
     REQUIRE(output.good());
 }
@@ -110,6 +116,83 @@ TEST_CASE("Enabled wave-overhangs generate flagged toolpaths for unsupported she
     Print wave;
     Test::init_and_process_print({unsupported_shelf()}, wave, settings(true));
     CHECK(count_waves(wave) > 0);
+}
+
+TEST_CASE("Elevated cut-plane sections export wave overhangs with physical motion limits", "[WaveOverhangs][Nonplanar][Windows]")
+{
+    const bool tilted = GENERATE(false, true);
+    const bool waves = GENERATE(false, true);
+    INFO("tilted " << tilted << ", waves " << waves);
+    DynamicPrintConfig config = settings(waves);
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"print_sequence", "by object"},
+        {"enable_prime_tower", "0"}, {"skirt_loops", "0"}, {"brim_type", "no_brim"},
+        {"use_relative_e_distances", "1"}, {"travel_speed_z", "4"},
+        {"wave_overhang_speed", "7.5"}, {"enable_arc_fitting", "0"},
+        {"machine_start_gcode", "G90\nM83\nG1 X0 Y0 Z2 F240\n"}, {"machine_end_gcode", "M400\n"},
+        {"before_layer_change_gcode", ""}, {"layer_change_gcode", "G92 E0\nG1 Z{layer_z}\n"},
+        {"time_lapse_gcode", ""}});
+    Print print;
+    Model model;
+    Test::init_print({unsupported_shelf()}, print, model, config);
+    ModelObject *object = model.objects.front();
+    object->instances.front()->set_offset(Vec3d(60., 60., 0.));
+    object->cut_planes.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(5., 5., 5.);
+    if (tilted)
+        plane.normal = Vec3d(std::sin(Geometry::deg2rad(10.)), 0., std::cos(Geometry::deg2rad(10.)));
+    object->cut_planes.planes.push_back(plane);
+    print.apply(model, config);
+    print.set_status_silent();
+    REQUIRE(print.validate().string.empty());
+    GCodeProcessorResult result;
+    const std::string output = Test::gcode(print, &result);
+    REQUIRE(print.objects().size() == 2);
+    REQUIRE(result.nonplanar_metadata_valid);
+    bool child_extruded = false;
+    for (const auto &move : result.moves)
+        if (move.type == EMoveType::Extrude && move.delta_extruder > 0.f && move.cut_segment_id == 1) {
+            REQUIRE(size_t(move.tool_axis_id) < result.tool_axes.size());
+            CHECK_THAT(result.tool_axes[move.tool_axis_id].z(),
+                Catch::Matchers::WithinAbs(tilted ? std::cos(Geometry::deg2rad(10.)) : 1., 1e-6));
+            child_extruded = true;
+        }
+    CHECK(child_extruded);
+    CHECK((count_waves(print) > 0) == waves);
+    for (const PrintObject *section : print.objects())
+        if (section->segment()->is_root())
+            for (const Layer *layer : section->layers())
+                for (const LayerRegion *region : layer->regions())
+                    CHECK(wave_count(&region->perimeters) == 0);
+    GCodeReader reader;
+    reader.apply_config(config);
+    int segment = -1;
+    bool in_wave = false;
+    size_t wave_moves = 0;
+    reader.parse_buffer(output, [&](GCodeReader &state, const GCodeReader::GCodeLine &line) {
+        if (line.raw().rfind("; SEGMENT_ID:", 0) == 0) {
+            CHECK_FALSE(in_wave);
+            segment = std::stoi(line.raw().substr(13));
+        } else if (line.raw() == "; WAVE_OVERHANG_BEGIN") {
+            CHECK_FALSE(in_wave);
+            CHECK(segment == 1);
+            in_wave = true;
+        } else if (line.raw() == "; WAVE_OVERHANG_END") {
+            CHECK(in_wave);
+            in_wave = false;
+        } else if (in_wave && line.extruding(state) && line.dist_XY(state) > 0.) {
+            CHECK(segment == 1);
+            CHECK(std::isfinite(line.new_Z(state)));
+            CHECK(line.new_F(state) > 0.);
+            CHECK(line.new_F(state) <= 240.1);
+            ++wave_moves;
+        }
+    });
+    CHECK_FALSE(in_wave);
+    CHECK((wave_moves > 0) == waves);
+    CHECK_NOTHROW(print.validate_nonplanar_gcode(result));
+    preserve_gcode_fixture(std::string("nonplanar-wave-") + (tilted ? "tilted-" : "upright-") +
+        (waves ? "enabled.gcode" : "disabled.gcode"), output);
 }
 
 TEST_CASE("Wave islands keep their own collection when unsupported walls are deferred", "[WaveOverhangs][Windows]")
