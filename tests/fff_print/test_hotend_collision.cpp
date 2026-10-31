@@ -65,6 +65,21 @@ TEST_CASE("A lifted transition outside earlier material stays clear", "[HotendCo
     CHECK_FALSE(check_hotend_collisions(result, HotendCollisionParams{}).has_value());
 }
 
+TEST_CASE("Wipe motion and deposited wipe material participate in clearance checks", "[HotendCollision]")
+{
+    const bool clear = GENERATE(false, true);
+    const bool depositing = GENERATE(false, true);
+    GCodeProcessorResult result;
+    sample_sections(result, clear, false);
+    if (depositing) {
+        result.moves[1].type = EMoveType::Wipe;
+    } else {
+        result.moves.back().type = EMoveType::Wipe;
+        result.moves.back().delta_extruder = -0.5f;
+    }
+    CHECK(check_hotend_collisions(result, HotendCollisionParams{}).has_value() == !clear);
+}
+
 TEST_CASE("Earlier material is checked within a single section in motion order", "[HotendCollision]")
 {
     const bool clear = GENERATE(false, true);
@@ -160,6 +175,7 @@ TEST_CASE("The export gate rejects colliding sections and disabled envelopes whi
 
 TEST_CASE("Section travel respects physical Z limits including calibration", "[HotendCollision][Print]")
 {
+    const bool wipe = GENERATE(false, true);
     Print print;
     Model model;
     DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
@@ -172,6 +188,8 @@ TEST_CASE("Section travel respects physical Z limits including calibration", "[H
     CHECK_THROWS_AS(print.validate_nonplanar_gcode(result), SlicingError);
     result.z_offset = 0.;
     result.moves.back().position.z() = -0.1f;
+    if (wipe)
+        result.moves.back().type = EMoveType::Wipe;
     CHECK_THROWS_AS(print.validate_nonplanar_gcode(result), SlicingError);
     config.set_deserialize_strict("enable_nonplanar", "0");
     print.apply(model, config);

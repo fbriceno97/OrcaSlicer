@@ -158,7 +158,7 @@ std::optional<ConflictResult> check_hotend_collisions(const GCodeProcessorResult
             episodes.push_back(std::move(e));
         }
         Episode &e = episodes.back();
-        if (m.type != EMoveType::Extrude && m.type != EMoveType::Travel)
+        if (m.type != EMoveType::Extrude && m.type != EMoveType::Travel && m.type != EMoveType::Wipe)
             continue;
         const Vec3d a = prev.position.cast<double>();
         const Vec3d b = m.position.cast<double>();
@@ -169,7 +169,7 @@ std::optional<ConflictResult> check_hotend_collisions(const GCodeProcessorResult
         if ((b - a).norm() < 1e-9)
             continue;
         sample_segment(a, b, 1.0, m.gcode_id, i, e.tips);
-        if (m.type == EMoveType::Extrude && m.delta_extruder > 0.f)
+        if ((m.type == EMoveType::Extrude || m.type == EMoveType::Wipe) && m.delta_extruder > 0.f)
             sample_segment(a, b, 0.5, m.gcode_id, i, e.material);
     }
     if (episodes.empty())

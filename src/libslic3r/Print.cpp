@@ -3916,7 +3916,7 @@ void Print::validate_nonplanar_gcode(const GCodeProcessorResult &result) const
     // Untagged start/end macros may include firmware-managed homing moves;
     // this check covers explicitly generated section extrusion and travel.
     for (const auto &move : result.moves) {
-        if (move.cut_segment_id < 0 || (move.type != EMoveType::Extrude && move.type != EMoveType::Travel))
+        if (move.cut_segment_id < 0 || (move.type != EMoveType::Extrude && move.type != EMoveType::Travel && move.type != EMoveType::Wipe))
             continue;
         const double machine_z = double(move.position.z()) + result.z_offset;
         if (!std::isfinite(machine_z) || machine_z < -EPSILON ||
