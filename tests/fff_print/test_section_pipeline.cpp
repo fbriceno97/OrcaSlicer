@@ -51,6 +51,7 @@
 namespace Slic3r::Test {
 struct PrintPipelineAccess {
     static void process(Print &print) { print.process_impl(nullptr, false); }
+    static Polygons bed_islands(const Print &print) { return print.first_layer_islands(); }
 };
 }
 
@@ -579,7 +580,7 @@ TEST_CASE("Section bed adhesion stays on upright roots across tilted sections an
     REQUIRE(validation.string.empty());
     REQUIRE_NOTHROW(print.process());
     CHECK_FALSE(print.get_conflict_result().has_value());
-    CHECK_THAT(area(print.first_layer_islands()) * SCALING_FACTOR * SCALING_FACTOR,
+    CHECK_THAT(area(Slic3r::Test::PrintPipelineAccess::bed_islands(print)) * SCALING_FACTOR * SCALING_FACTOR,
         Catch::Matchers::WithinAbs(64. * (two_copies ? 2. : 1.), 0.05));
     for (const auto &group : print.skirt_brim_groups())
         for (const auto &instance : group.instances) {
