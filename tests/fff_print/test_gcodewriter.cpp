@@ -2325,7 +2325,11 @@ TEST_CASE("Global section transitions exchange macro positions in machine coordi
         CHECK_THAT((writer.get_position() - Vec3d(116., 218., 25.)).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
         GCodeReader reader;
         Vec3d emitted = Vec3d::Zero();
-        const std::string output = writer.travel_to_xyz(writer.get_position());
+        // The raw macro already moved Z. The following writer command may
+        // legitimately emit only XY, so parse the complete machine trace.
+        const std::string followup = writer.travel_to_xyz(writer.get_position());
+        REQUIRE_FALSE(followup.empty());
+        const std::string output = "G1 X16 Y18 Z25\n" + followup;
         reader.parse_buffer(output, [&](GCodeReader &state, const GCodeReader::GCodeLine &line) {
             if (line.cmd_is("G1"))
                 emitted = Vec3d(line.new_X(state), line.new_Y(state), line.new_Z(state));

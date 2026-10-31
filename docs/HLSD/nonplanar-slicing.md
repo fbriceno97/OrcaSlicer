@@ -63,7 +63,9 @@ Normal and organic support installation clips generated layer polygons and
 contact, overhang and enforcer footprints against the section's bounds over the
 whole support layer-height span before installing support layers. Floors and ceilings both limit this region; only
 floors provide load-bearing heights. Normal and classic-tree overhang detection
-count the floor crossing a layer slab as material supporting that slab. Classic
+count floor contact from the actual previous slice height through the current
+layer as supporting material. This includes shallow cut faces and Z anti-aliasing
+sampling offsets rather than assuming mid-layer sampling. Classic
 tree also excludes floor-supported first-layer strips from sharp-tail seeds.
 Classic-tree descent terminates only when an entire circular or polygon foot
 reaches a load-bearing floor; disk tests include the radius in every XY direction.

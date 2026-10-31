@@ -1434,7 +1434,14 @@ void PrintObject::slice_volumes()
     region_slices.clear();
 
     BOOST_LOG_TRIVIAL(debug) << "Slicing volumes - removing top empty layers";
-    while (! m_layers.empty()) {
+    // Section ceilings reserve empty sampling rows for inherited support
+    // contacts. Removing them here shortens the contact grid and leaves the
+    // parent support below the child's floor. Export filters nonprinting rows.
+    const bool keep_support_planning = m_segment && has_support() &&
+        std::any_of(m_segment->clips.begin(), m_segment->clips.end(), [](const CutSegmentClip &clip) {
+            return clip.role == CutClipRole::Ceiling;
+        });
+    while (!keep_support_planning && !m_layers.empty()) {
         const Layer *layer = m_layers.back();
         if (! layer->empty())
             break;
