@@ -4,6 +4,10 @@
 #include <Windows.h>
 #endif
 
+#include <optional>
+#include "Support/SectionSupportDemand.hpp"
+#include "CutPlaneSegmentation.hpp"
+
 #include "PrintBase.hpp"
 #include <utility>
 #include <string>
@@ -37,6 +41,7 @@
 #include <chrono>
 #include <optional>
 #include "GCode/GCodeProcessor.hpp"
+#include "GCode/HotendCollisionCheck.hpp"
 #include "GCode/ThumbnailData.hpp"
 #include "ExtrusionEntity.hpp"
 #include <math.h>
@@ -80,6 +85,8 @@
 #include "PrintConfig.hpp"
 #include "MaterialType.hpp"
 #include "Model.hpp"
+#include "CutPlanes.hpp"
+#include <initializer_list>
 #include "format.hpp"
 #include "LocalesUtils.hpp"
 #include <float.h>
@@ -118,6 +125,44 @@ using namespace nlohmann;
 #define L(s) Slic3r::I18N::translate(s)
 
 namespace Slic3r {
+
+// Authored sections must never silently fall back to ordinary planar output.
+// Remove this capability guard only when segment slicing, export, preview and
+// collision enforcement are connected and validated together.
+static const ModelObject *unsupported_nonplanar_object(const Print &print)
+{
+    if (!print.config().enable_nonplanar.value)
+        return nullptr;
+    const auto requests_direction = [](const ModelConfig &config) {
+        for (const char *key : {"layer_rotation_b", "layer_rotation_c"})
+            if (config.has(key)) {
+                const double value = config.opt_float(key);
+                if (!std::isfinite(value) || std::abs(value) > EPSILON)
+                    return true;
+            }
+        return false;
+    };
+    for (const PrintObject *print_object : print.objects()) {
+        const ModelObject *object = print_object->model_object();
+        if (print_object->segment().has_value())
+            return object;
+        if (object->cut_planes.active())
+            for (const CutPlane &plane : object->cut_planes.planes)
+                if (plane.enabled)
+                    return object;
+        if (requests_direction(object->config))
+            return object;
+        for (const ModelVolume *volume : object->volumes)
+            if (volume->is_model_part() && requests_direction(volume->config))
+                return object;
+    }
+    return nullptr;
+}
+
+static std::string unsupported_nonplanar_message()
+{
+    return L("Active cut planes or build directions are not supported by this experimental build yet. Disable them to slice normally.");
+}
 
 Print::SlicingPipelineHookFn Print::s_slicing_pipeline_hook_fn = nullptr;
 
@@ -387,6 +432,7 @@ bool Print::invalidate_state_by_config_options(const ConfigOptionResolver & /* n
             // Build plate tilt changes slicing plane orientation.
             || opt_key == "build_plate_tilt_x"
             || opt_key == "build_plate_tilt_y"
+            || opt_key == "enable_nonplanar"
             // Belt printer transform options change the mesh geometry before slicing.
             || opt_key == "belt_printer"
             || opt_key == "belt_slice_rotation"
@@ -1859,6 +1905,8 @@ std::string Print::slicing_errors_message(const SlicingErrors &errors) const
 
 StringObjectException Print::validate(std::vector<StringObjectException> *warnings, Polygons* collison_polygons, std::vector<std::pair<Polygon, float>>* height_polygons) const
 {
+    if (const ModelObject *object = unsupported_nonplanar_object(*this))
+        return {unsupported_nonplanar_message(), object};
     auto add_warning = [warnings](StringObjectException w) {
         w.is_warning = true;
         if (warnings != nullptr)
@@ -3134,6 +3182,8 @@ std::map<ObjectID, unsigned int> getObjectExtruderMap(const Print& print) {
 // Slicing process, running at a background thread.
 void Print::process(long long *time_cost_with_cache, bool use_cache)
 {
+    if (unsupported_nonplanar_object(*this) != nullptr)
+        throw Slic3r::SlicingError(unsupported_nonplanar_message());
     long long start_time = 0, end_time = 0;
     if (time_cost_with_cache)
         *time_cost_with_cache = 0;
@@ -3181,6 +3231,9 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
 
     //add the print_object share check logic
     auto is_print_object_the_same = [](const PrintObject* object1, const PrintObject* object2) -> bool{
+        if (object1->segment() != object2->segment() ||
+            object1->nonplanar_instance_key() != object2->nonplanar_instance_key())
+            return false;
         if (object1->trafo().matrix() != object2->trafo().matrix())
             return false;
         const ModelObject* model_obj1 = object1->model_object();
@@ -3228,6 +3281,10 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
     int object_count = m_objects.size();
     std::set<PrintObject*> need_slicing_objects;
     std::set<PrintObject*> re_slicing_objects;
+    const auto support_families = section_support_families(*this);
+    std::unordered_set<PrintObject *> family_members;
+    for (const auto &family : support_families)
+        family_members.insert(family.begin(), family.end());
     // Belt global modes couple each object's bed position into its layer Z values,
     // so sharing layers between "identical" objects is wrong.
     bool belt_no_share = m_config.belt_printer.value;
@@ -3385,10 +3442,18 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
             for (size_t i = 0; i < m_objects.size(); ++i)
                 sup_was_done[i] = m_objects[i]->is_step_done(posSupportMaterial) ? 1 : 0;
 
+        for (const auto &family : support_families) {
+            for (size_t i = 0; i < m_objects.size(); ++i)
+                if (std::find(family.begin(), family.end(), m_objects[i]) != family.end())
+                    sup_was_done[i] = 0;
+            generate_section_support_family(family, [this]() { throw_if_canceled(); });
+        }
         tbb::parallel_for(tbb::blocked_range<int>(0, int(m_objects.size())),
-            [this, need_slicing_objects](const tbb::blocked_range<int>& range) {
+            [this, need_slicing_objects, &family_members](const tbb::blocked_range<int>& range) {
                 for (int i = range.begin(); i < range.end(); i++) {
                     PrintObject* obj = m_objects[i];
+                    if (family_members.count(obj) != 0)
+                        continue;
                     if (need_slicing_objects.count(obj) != 0) {
                         // The belt brim follows sequentially below.
                         obj->generate_support_material(false);
@@ -3447,12 +3512,23 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
                 obj->make_perimeters();
                 obj->infill();
                 obj->ironing();
-                obj->generate_support_material();
-                obj->detect_overhangs_for_lift();
-                obj->estimate_curled_extrusions();
+                if (family_members.count(obj) == 0) {
+                    obj->generate_support_material();
+                    obj->detect_overhangs_for_lift();
+                    obj->estimate_curled_extrusions();
+                }
             }
         }
     }
+
+    if (use_cache)
+        for (const auto &family : support_families) {
+            generate_section_support_family(family, [this]() { throw_if_canceled(); });
+            for (PrintObject *object : family) {
+                object->detect_overhangs_for_lift();
+                object->estimate_curled_extrusions();
+            }
+        }
 
     for (PrintObject *obj : m_objects)
     {
@@ -3844,8 +3920,54 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
 // The export_gcode may die for various reasons (fails to process filename_format,
 // write error into the G-code, cannot execute post-processing scripts).
 // It is up to the caller to show an error message.
+void Print::validate_nonplanar_gcode_file(const std::string &path) const
+{
+    if (!m_config.enable_nonplanar.value)
+        return;
+    GCodeProcessor processor;
+    // Edited files may have lost the embedded configuration block. Initialize
+    // the processor from this print before parsing either annotated or raw XYZ.
+    processor.apply_config(m_config);
+    processor.preserve_preparation_z(true);
+    const Vec3d origin = get_plate_origin();
+    processor.set_xy_offset(origin.x(), origin.y());
+    processor.process_file(path);
+    validate_nonplanar_gcode(processor.get_result());
+}
+
+void Print::validate_nonplanar_gcode(const GCodeProcessorResult &result) const
+{
+    if (!m_config.enable_nonplanar.value)
+        return;
+    if (!result.nonplanar_metadata_valid)
+        throw SlicingError(_u8L("Non-planar G-code contains invalid section or build-direction metadata."));
+    // Preview removes Z calibration from stored positions. Restore it when
+    // checking actual section motion against the printer's vertical limits.
+    // Untagged start/end macros may include firmware-managed homing moves;
+    // this check covers explicitly generated section extrusion and travel.
+    for (const auto &move : result.moves) {
+        if (move.cut_segment_id < 0 || (move.type != EMoveType::Extrude && move.type != EMoveType::Travel && move.type != EMoveType::Wipe))
+            continue;
+        const double machine_z = double(move.position.z()) + result.z_offset;
+        if (!std::isfinite(machine_z) || machine_z < -EPSILON ||
+            machine_z > m_config.printable_height.value + EPSILON)
+            throw SlicingError(_u8L("Non-planar section motion exceeds the printer's vertical travel limits."));
+    }
+    HotendCollisionParams params;
+    params.throw_on_cancel = [this]() { throw_if_canceled(); };
+    params.envelope = HotendEnvelope::from_config(m_config);
+    if (!params.envelope.enabled())
+        throw SlicingError(_u8L("Non-planar G-code requires an enabled hotend envelope for collision checks."));
+    // Supported Bambu and other three-axis machines keep the nozzle upright.
+    // A clear result covers this modeled envelope, not physical printer validation.
+    if (const auto collision = check_hotend_collisions(result, params))
+        throw SlicingError(collision->message);
+}
+
 std::string Print::export_gcode(const std::string& path_template, GCodeProcessorResult* result, ThumbnailsGeneratorCallback thumbnail_cb)
 {
+    if (unsupported_nonplanar_object(*this) != nullptr)
+        throw Slic3r::SlicingError(unsupported_nonplanar_message());
     // output everything to a G-code file
     // The following call may die if the filename_format template substitution fails.
     std::string path = this->output_filepath(path_template);
@@ -5530,6 +5652,7 @@ void Print::export_gcode_from_previous_file(const std::string& file, GCodeProces
 
     try {
         GCodeProcessor processor;
+        processor.preserve_preparation_z(m_config.enable_nonplanar.value);
         GCodeProcessor::s_IsBBLPrinter = is_BBL_printer();
         const Vec3d origin = this->get_plate_origin();
         processor.set_xy_offset(origin(0), origin(1));
@@ -5540,6 +5663,7 @@ void Print::export_gcode_from_previous_file(const std::string& file, GCodeProces
             processor.initialize_from_context(result->nozzle_group_result);
         //processor.enable_producers(true);
         processor.process_file(file);
+        validate_nonplanar_gcode(processor.get_result());
 
         // filament seq is loaded from file, processor result will override the value
         auto filament_seq_loaded = result->filament_change_sequence;
@@ -5579,6 +5703,7 @@ void Print::export_gcode_from_previous_file(const std::string& file, GCodeProces
 void Print::reload_gcode_moves(GCodeProcessorResult* result) const
 {
     GCodeProcessor processor;
+    processor.preserve_preparation_z(m_config.enable_nonplanar.value);
     GCodeProcessor::s_IsBBLPrinter = is_BBL_printer();
     const Vec3d origin = this->get_plate_origin();
     processor.set_xy_offset(origin(0), origin(1));
@@ -5588,6 +5713,8 @@ void Print::reload_gcode_moves(GCodeProcessorResult* result) const
     try {
         processor.process_file(result->filename);
     } catch (const std::exception& ex) {
+        if (m_config.enable_nonplanar.value)
+            throw SlicingError(_u8L("The edited non-planar G-code could not be read for collision checks."));
         // The edited file is what gets printed, so failing to preview it must not fail the slice.
         BOOST_LOG_TRIVIAL(error) << __FUNCTION__ << ": cannot re-read the G-code file " << result->filename << ": " << ex.what();
         std::lock_guard<std::mutex> lock(result->result_mutex);
@@ -5596,9 +5723,12 @@ void Print::reload_gcode_moves(GCodeProcessorResult* result) const
     }
 
     GCodeProcessorResult& reloaded = processor.result();
+    validate_nonplanar_gcode(reloaded);
     std::lock_guard<std::mutex> lock(result->result_mutex);
     result->moves      = std::move(reloaded.moves);
     result->lines_ends = std::move(reloaded.lines_ends);
+    result->tool_axes = std::move(reloaded.tool_axes);
+    result->nonplanar_metadata_valid = reloaded.nonplanar_metadata_valid;
 }
 
 std::tuple<float, float> Print::object_skirt_offset(double margin_height) const
@@ -6921,6 +7051,18 @@ int Print::load_cached_data(const std::string& directory)
     object_filenames.clear();
     BOOST_LOG_TRIVIAL(info) << __FUNCTION__<< boost::format(": total printobject count %1%, loaded %2%, ret=%3%")%m_objects.size() %count %ret;
     return ret;
+}
+
+Transform3d PrintInstance::get_slice_to_world_transform() const
+{
+    // trafo() already includes instance scaling, mirroring and shrinkage. Undo
+    // only the slicing frame, then restore the XY placement removed by apply().
+    // Using the full model-instance transform here would apply shrinkage twice
+    // or discard it, depending on which coordinates the caller starts with.
+    Transform3d result = print_object->trafo() * print_object->trafo_sliced().inverse();
+    const Point placement = shift - print_object->center_offset();
+    result.pretranslate(Vec3d(unscale<double>(placement.x()), unscale<double>(placement.y()), 0.));
+    return result;
 }
 
 BoundingBoxf3 PrintInstance::get_bounding_box() const {

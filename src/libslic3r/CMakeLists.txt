@@ -119,6 +119,10 @@ set(lisbslic3r_sources
     CustomGCode.hpp
     CutUtils.cpp
     CutUtils.hpp
+    CutPlanes.hpp
+    CutPlanes.cpp
+    CutPlaneSegmentation.cpp
+    CutPlaneSegmentation.hpp
     EdgeGrid.cpp
     EdgeGrid.hpp
     ElephantFootCompensation.cpp
@@ -141,6 +145,12 @@ set(lisbslic3r_sources
     ExtrusionEntityCollection.hpp
     ExtrusionEntity.cpp
     ExtrusionEntity.hpp
+    # Unlayered wave toolpath engine (feature opt-in, off by default).
+    WaveOverhangs/WaveOverhangs.cpp
+    WaveOverhangs/WaveOverhangs.hpp
+    WaveOverhangs/IGenerator.hpp
+    WaveOverhangs/AndersonsGenerator.cpp
+    WaveOverhangs/AndersonsGenerator.hpp
     ExtrusionSimulator.cpp
     ExtrusionSimulator.hpp
     FaceDetector.cpp
@@ -209,6 +219,8 @@ set(lisbslic3r_sources
     TextureToColor/ColorUtils.cpp
     Flow.cpp
     Flow.hpp
+    HotendEnvelope.cpp
+    HotendEnvelope.hpp
     FlushVolCalc.cpp
     FlushVolCalc.hpp
     Format/3mf.cpp
@@ -265,6 +277,12 @@ set(lisbslic3r_sources
     GCode/FanMover.hpp
     GCode/GCodeProcessor.cpp
     GCode/GCodeProcessor.hpp
+    GCode/HotendCollisionCheck.cpp
+    GCode/SectionFrame.cpp
+    GCode/SectionFrame.hpp
+    GCode/HotendCollisionCheck.hpp
+    GCode/TrunnionAC.cpp
+    GCode/TrunnionAC.hpp
     GCode/GCodeStatistics.cpp
     GCode/GCodeStatistics.hpp
     GCode/ElegooGCodeProcessorHelper.cpp
@@ -485,6 +503,10 @@ set(lisbslic3r_sources
     Slicing.hpp
     Support/BeltFloorContext.cpp
     Support/BeltFloorContext.hpp
+    Support/SectionSupportDemand.cpp
+    Support/SectionSupportDemand.hpp
+    Support/SegmentSupportBounds.cpp
+    Support/SegmentSupportBounds.hpp
     Support/SupportCommon.cpp
     Support/SupportCommon.hpp
     Support/SupportLayer.hpp
@@ -601,6 +623,12 @@ if (APPLE)
             Format/ModelIO.mm
         )
 endif ()
+
+# Only the existing standalone kinematics math is needed by the collision check.
+# The printer-config adapter and rotary G-code export are not enabled here.
+set_source_files_properties(GCode/TrunnionAC.cpp PROPERTIES
+    COMPILE_DEFINITIONS TRUNNION_AC_STANDALONE
+    SKIP_PRECOMPILE_HEADERS ON)
 
 add_library(libslic3r STATIC ${lisbslic3r_sources}
     "${CMAKE_CURRENT_BINARY_DIR}/libslic3r_version.h"

@@ -38,6 +38,9 @@ add_executable(${_TEST_NAME}_tests
     test_fill_plane_path.cpp
     test_fill_tpms_adaptive.cpp
     test_geometry.cpp
+    test_hotend_envelope.cpp
+    test_segment_support_bounds.cpp
+    test_section_preview.cpp
     test_imex_arrange.cpp
     test_imex_helpers.cpp
     test_imex_zones.cpp
@@ -71,6 +74,7 @@ add_executable(${_TEST_NAME}_tests
     # test_png_io.cpp
     test_indexed_triangle_set.cpp
     test_connected_bodies.cpp
+    test_cut_plane_segmentation.cpp
     test_texture_displacement.cpp
     test_instance_lock.cpp
     ../libnest2d/printer_parts.cpp

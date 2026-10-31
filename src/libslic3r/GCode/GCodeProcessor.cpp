@@ -34,6 +34,7 @@
 #include <boost/filesystem/path.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <cmath>
 #include <exception>
 #include <deque>
@@ -126,7 +127,9 @@ const std::vector<std::string> GCodeProcessor::Reserved_Tags = {
     "@TOTAL_WEIGHT@",
     "@TOTAL_COST@",
     "@TOTAL_WIPE_TOWER_COST@",
-    "@TOTAL_WIPE_TOWER_FILAMENT@"
+    "@TOTAL_WIPE_TOWER_FILAMENT@",
+    " TOOL_AXIS:",
+    "SEGMENT_ID:"
 };
 
 const std::vector<std::string> GCodeProcessor::Reserved_Tags_compatible = {
@@ -159,7 +162,9 @@ const std::vector<std::string> GCodeProcessor::Reserved_Tags_compatible = {
     "@TOTAL_WEIGHT@",
     "@TOTAL_COST@",
     "@TOTAL_WIPE_TOWER_COST@",
-    "@TOTAL_WIPE_TOWER_FILAMENT@"
+    "@TOTAL_WIPE_TOWER_FILAMENT@",
+    " TOOL_AXIS:",
+    "SEGMENT_ID:"
 };
 
 
@@ -2583,6 +2588,8 @@ void GCodeProcessorResult::reset() {
 
     // moves and lines_ends grow with the print: free them, as no reset result reuses the capacity.
     clear_and_shrink(moves);
+    tool_axes.assign(1, Vec3f::UnitZ());
+    nonplanar_metadata_valid = true;
     plate_mass = {};
     object_masses.clear();
     body_masses.clear();
@@ -2599,6 +2606,7 @@ void GCodeProcessorResult::reset() {
     long_retraction_when_cut = false;
     timelapse_warning_code = 0;
     printable_height = 0.0f;
+    z_offset = 0.f;
     machine_frame_transform_active = false;
     belt_tilt_angle = 0.f;
     belt_z_origin   = 0.f;
@@ -3685,6 +3693,7 @@ void GCodeProcessor::reset()
     m_zero_layer_height = 0.0f;
     m_first_layer_height = 0.0f;
     m_processing_start_custom_gcode = false;
+    m_preserve_preparation_z = false;
     m_in_config_block = false;
     m_g1_line_id = 0;
     m_layer_id = 0;
@@ -3697,6 +3706,8 @@ void GCodeProcessor::reset()
     m_used_filaments.reset();
 
     m_result.reset();
+    m_tool_axis_id = 0;
+    m_cut_segment_id = -1;
     m_result.id = ++s_result_id;
 
     m_last_default_color_id = 0;
@@ -3742,7 +3753,7 @@ void GCodeProcessor::process_file(const std::string& filename, std::function<voi
     // pre-processing
     // parse the gcode file to detect its producer
     {
-        m_parser.parse_file_raw(filename, [this](GCodeReader& reader, const char *begin, const char *end) {
+        const bool read_ok = m_parser.parse_file_raw(filename, [this](GCodeReader& reader, const char *begin, const char *end) {
             begin = skip_whitespaces(begin, end);
             if (begin != end && *begin == ';') {
                 // Comment.
@@ -3759,6 +3770,8 @@ void GCodeProcessor::process_file(const std::string& filename, std::function<voi
                 }
             }
         });
+        if (!read_ok)
+            throw Slic3r::RuntimeError(_u8L("Cannot read the G-code file."));
         m_parser.reset();
 
         // if the gcode was produced by OrcaSlicer,
@@ -3797,7 +3810,7 @@ void GCodeProcessor::process_file(const std::string& filename, std::function<voi
     m_result.id = ++s_result_id;
     initialize_result_moves();
     size_t parse_line_callback_cntr = 10000;
-    m_parser.parse_file(filename, [this, cancel_callback, &parse_line_callback_cntr](GCodeReader& reader, const GCodeReader::GCodeLine& line) {
+    const bool read_ok = m_parser.parse_file(filename, [this, cancel_callback, &parse_line_callback_cntr](GCodeReader& reader, const GCodeReader::GCodeLine& line) {
         if (-- parse_line_callback_cntr == 0) {
             // Don't call the cancel_callback() too often, do it every at every 10000'th line.
             parse_line_callback_cntr = 10000;
@@ -3806,6 +3819,8 @@ void GCodeProcessor::process_file(const std::string& filename, std::function<voi
         }
         this->process_gcode_line(line, true);
     }, m_result.lines_ends);
+    if (!read_ok)
+        throw Slic3r::RuntimeError(_u8L("Cannot read the G-code file."));
 
     // Don't post-process the G-code to update time stamps.
     this->finalize(false);
@@ -4265,6 +4280,53 @@ bool GCodeProcessor::get_last_position_from_gcode(const std::string &gcode_str, 
 
 void GCodeProcessor::process_tags(const std::string_view comment, bool producers_enabled)
 {
+    std::string_view section_tag = comment;
+    while (!section_tag.empty() && (section_tag.front() == ' ' || section_tag.front() == '\t'))
+        section_tag.remove_prefix(1);
+    if (boost::starts_with(section_tag, "SEGMENT_ID:")) {
+        int segment;
+        if (parse_number(section_tag.substr(11), segment) && segment >= -1)
+            m_cut_segment_id = segment;
+        else
+            m_result.nonplanar_metadata_valid = false;
+        return;
+    }
+    if (boost::starts_with(section_tag, "TOOL_AXIS:")) {
+        const std::string_view payload = section_tag.substr(10);
+        const size_t first = payload.find(','), second = payload.find(',', first == std::string_view::npos ? 0 : first + 1);
+        float x, y, z;
+        if (payload.size() > 128 || first == std::string_view::npos || second == std::string_view::npos ||
+            !parse_number(payload.substr(0, first), x) ||
+            !parse_number(payload.substr(first + 1, second - first - 1), y) ||
+            !parse_number(payload.substr(second + 1), z)) {
+            m_result.nonplanar_metadata_valid = false;
+            return;
+        }
+        Vec3f axis(x, y, z);
+        const float scale = axis.cwiseAbs().maxCoeff();
+        if (!axis.allFinite() || scale == 0.f) {
+            m_result.nonplanar_metadata_valid = false;
+            return;
+        }
+        axis = (axis / scale).normalized();
+        if (!axis.allFinite() || axis.squaredNorm() < 0.5f) {
+            m_result.nonplanar_metadata_valid = false;
+            return;
+        }
+        auto found = std::find_if(m_result.tool_axes.begin(), m_result.tool_axes.end(), [&axis](const Vec3f &known) {
+            return (known - axis).squaredNorm() < 1e-12f;
+        });
+        if (found == m_result.tool_axes.end()) {
+            if (m_result.tool_axes.size() > std::numeric_limits<uint16_t>::max()) {
+                m_result.nonplanar_metadata_valid = false;
+                return;
+            }
+            m_tool_axis_id = static_cast<uint16_t>(m_result.tool_axes.size());
+            m_result.tool_axes.push_back(axis);
+        } else
+            m_tool_axis_id = static_cast<uint16_t>(found - m_result.tool_axes.begin());
+        return;
+    }
     // producers tags
     if (producers_enabled && process_producers_tags(comment))
         return;
@@ -7217,7 +7279,10 @@ void GCodeProcessor::store_move_vertex(EMoveType type, EMovePathType path_type, 
     // printers so prepare-stage moves map correctly. Gated on belt_tilt_angle (set
     // from the G-code header before the body is processed) so non-belt processing
     // is byte-identical.
-    const float store_z = (m_processing_start_custom_gcode && m_result.belt_tilt_angle == 0.f)
+    // Annotated section travel must also retain actual Z: preview flattening
+    // would hide clearance moves from both the viewer and collision checks.
+    const float store_z = (m_processing_start_custom_gcode && !m_preserve_preparation_z &&
+        m_result.belt_tilt_angle == 0.f && m_cut_segment_id < 0)
         ? m_first_layer_height
         : m_end_position[Z] - m_z_offset;
 
@@ -7249,7 +7314,9 @@ void GCodeProcessor::store_move_vertex(EMoveType type, EMovePathType path_type, 
         std::max<unsigned int>(1, m_layer_id) - 1,
         internal_only,
         m_object_label_id,
-        m_print_z
+        m_print_z,
+        m_tool_axis_id,
+        m_cut_segment_id
     });
 
     if (type == EMoveType::Seam) {

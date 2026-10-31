@@ -107,6 +107,7 @@ namespace pt = boost::property_tree;
 #include <Eigen/Dense>
 #include "miniz_extension.hpp"
 #include "nlohmann/json.hpp"
+#include "libslic3r/CutPlanes.hpp"
 
 #include "TextConfiguration.hpp"
 #include "EmbossShape.hpp"
@@ -2270,6 +2271,14 @@ void PlateData::parse_filament_info(GCodeProcessorResult *result)
                     //BBS: add module name
                     else if (metadata.key == "module")
                         model_object->module_name = metadata.value;
+                    else if (metadata.key == cut_planes_metadata_key) {
+                        try {
+                            model_object->cut_planes = cut_plane_stack_from_json(metadata.value);
+                        } catch (const std::exception &error) {
+                            add_error(std::string("Invalid cut-plane metadata: ") + error.what());
+                            return false;
+                        }
+                    }
                     else
                         model_object->config.set_deserialize(metadata.key, metadata.value, config_substitutions);
                 }
@@ -8309,6 +8318,10 @@ bool _BBS_3MF_Exporter::_add_model_config_file_to_archive(mz_zip_archive& archiv
                 //BBS: store object's module name
                 if (!obj->module_name.empty())
                     stream << "    <" << METADATA_TAG << " " << KEY_ATTR << "=\"module\" " << VALUE_ATTR << "=\"" << xml_escape(obj->module_name) << "\"/>\n";
+
+                if (!obj->cut_planes.empty() || obj->cut_planes.enabled || obj->cut_planes.user_ordered)
+                    stream << "    <" << METADATA_TAG << " " << KEY_ATTR << "=\"" << cut_planes_metadata_key << "\" "
+                           << VALUE_ATTR << "=\"" << xml_escape(cut_plane_stack_to_json(obj->cut_planes)) << "\"/>\n";
 
                 // stores object's config data
                 for (const std::string& key : obj->config.keys()) {

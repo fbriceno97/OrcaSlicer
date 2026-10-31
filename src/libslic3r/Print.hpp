@@ -3,6 +3,7 @@
 
 #include "Config.hpp"
 #include "Model.hpp"
+#include "CutPlaneSegmentation.hpp"
 #include "Polygon.hpp"
 #include "Fill/FillBase.hpp"
 #include "Polyline.hpp"
@@ -245,6 +246,8 @@ struct PrintInstance
 	Point 				 shift;
     
     BoundingBoxf3   get_bounding_box() const;
+    // Slice coordinates to this copy's placed world geometry, before plate/nozzle calibration.
+    Transform3d get_slice_to_world_transform() const;
     Polygon get_convex_hull_2d();
     // SoftFever
     // 
@@ -374,6 +377,15 @@ public:
     ConstLayerPtrsAdaptor        layers() const         { return ConstLayerPtrsAdaptor(&m_layers); }
     ConstSupportLayerPtrsAdaptor support_layers() const { return ConstSupportLayerPtrsAdaptor(&m_support_layers); }
     const Transform3d&           trafo() const          { return m_trafo; }
+    const std::optional<CutSegmentDescriptor>& segment() const { return m_segment; }
+    int                         segment_index() const { return m_segment ? m_segment->index : -1; }
+    size_t                      nonplanar_instance_key() const { return m_nonplanar_instance_key; }
+    const std::vector<Polygons>& segment_support_demand() const { return m_segment_support_demand; }
+    const std::vector<Polygons>& segment_body_demand() const { return m_segment_body_demand; }
+    void clear_segment_support_demand();
+    void add_segment_support_demand(const std::vector<Polygons> &demand);
+    void add_segment_body_demand(const std::vector<Polygons> &demand);
+
     // Trafo with the center_offset() applied after the transformation, to center the object in XY before slicing.
     Transform3d                  trafo_centered() const
         { Transform3d t = this->trafo(); t.pretranslate(Vec3d(- unscale<double>(m_center_offset.x()), - unscale<double>(m_center_offset.y()), 0)); return t; }
@@ -551,8 +563,10 @@ public:
     void set_id(size_t id) { m_id = id; }
 
   private:
-    // to be called from Print only.
+    // Pipeline entry points are restricted to Print and its section-family driver.
     friend class Print;
+    friend void generate_section_support_family(const std::vector<PrintObject *> &,
+        const std::function<void()> &);
 
 	PrintObject(Print* print, ModelObject* model_object, const Transform3d& trafo, PrintInstances&& instances);
 	~PrintObject();
@@ -666,6 +680,11 @@ private:
     PrintObjectConfig                       m_config;
     // Translation in Z + Rotation + Scaling / Mirroring.
     Transform3d                             m_trafo = Transform3d::Identity();
+    std::optional<CutSegmentDescriptor>      m_segment;
+    size_t                                  m_nonplanar_instance_key {0};
+    // Transient load from later plane sections, in this object's slicing frame.
+    std::vector<Polygons>                    m_segment_support_demand;
+    std::vector<Polygons>                    m_segment_body_demand;
     // Slic3r::Point objects in scaled G-code coordinates
     std::vector<PrintInstance>              m_instances;
     // The mesh is being centered before thrown to Clipper, so that the Clipper's fixed coordinates require less bits.
@@ -1083,6 +1102,9 @@ public:
     // Exports G-code into a file name based on the path_template, returns the file path of the generated G-code file.
     // If preview_data is not null, the preview_data is filled in for the G-code visualization (not used by the command line Slic3r).
     std::string         export_gcode(const std::string& path_template, GCodeProcessorResult* result, ThumbnailsGeneratorCallback thumbnail_cb = nullptr);
+    // Called before the temporary G-code becomes an exportable file, also for CLI exports.
+    void                validate_nonplanar_gcode(const GCodeProcessorResult &result) const;
+    void                validate_nonplanar_gcode_file(const std::string &path) const;
     //return 0 means successful
     int                 export_cached_data(const std::string& dir_path, bool with_space=false) override;
     int                 load_cached_data(const std::string& directory) override;

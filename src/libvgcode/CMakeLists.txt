@@ -19,6 +19,7 @@ set(LIBVGCODE_SOURCES
     include/ColorRange.hpp
     include/GCodeInputData.hpp
     include/PathVertex.hpp
+    include/SectionPreview.hpp
     include/Types.hpp
     include/Viewer.hpp
 	# source

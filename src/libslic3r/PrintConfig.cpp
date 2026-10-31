@@ -6,6 +6,9 @@
 #include "BeltTransform.hpp"
 #include "ClipperUtils.hpp"
 #include "Config.hpp"
+#include "HotendEnvelope.hpp"
+#include <Eigen/Geometry>
+#include <stdexcept>
 #include "Geometry.hpp"
 #include "FilamentMixer.hpp"
 #include "MaterialType.hpp"
@@ -81,6 +84,41 @@ void ReplaceString(std::string &resource_str, const std::string &old_str, const 
 }
 
 namespace Slic3r {
+
+Matrix3d tool_head_frame(const Vec3d &tool_axis)
+{
+    if (!tool_axis.allFinite() || tool_axis.cwiseAbs().maxCoeff() == 0.)
+        throw std::invalid_argument("Tool axis must be finite and nonzero");
+    const Vec3d n = (tool_axis / tool_axis.cwiseAbs().maxCoeff()).normalized();
+    Matrix3d frame;
+    const double xy = std::hypot(n.x(), n.y());
+    if (xy < 1e-6) {
+        frame.setIdentity();
+        if (n.z() < 0.)
+            frame.diagonal() << 1., -1., -1.;
+    } else {
+        const Vec3d y(-n.y() / xy, n.x() / xy, 0.);
+        frame.row(0) = y.cross(n).transpose();
+        frame.row(1) = y.transpose();
+        frame.row(2) = n.transpose();
+    }
+    return frame;
+}
+
+HotendEnvelope HotendEnvelope::from_config(const ConfigBase &config)
+{
+    HotendEnvelope envelope;
+    if (const auto *height = config.option<ConfigOptionFloat>("nonplanar_hotend_cone_height"))
+        envelope.height = height->value;
+    for (int s = 0; s < 4; ++s) {
+        const auto side = HotendEnvelope::Side(s);
+        if (const auto *angle = config.option<ConfigOptionFloat>(option_key(side)))
+            envelope.angle[s] = angle->value;
+        envelope.spread(side); // Invalid imported values must not silently disable clearance limits.
+    }
+    envelope.enabled();
+    return envelope;
+}
 
 //! macro used to mark string used at localization,
 //! return same string
@@ -1086,6 +1124,24 @@ void PrintConfigDef::init_common_params()
     def->min = 0;
     def->set_default_value(new ConfigOptionFloat(INITIAL_LAYER_HEIGHT));
 
+    // Keep per-part build directions as explicit experimental data. They are
+    // not defaults in a static print config or exposed in the settings UI yet.
+    def = this->add("layer_rotation_b", coFloat);
+    def->label = L("Section build rotation around Y");
+    def->sidetext = L("degrees");
+    def->min = -180.;
+    def->max = 180.;
+    def->mode = comDevelop;
+    def->set_default_value(new ConfigOptionFloat(0.));
+
+    def = this->add("layer_rotation_c", coFloat);
+    def->label = L("Section build rotation around Z");
+    def->sidetext = L("degrees");
+    def->min = -180.;
+    def->max = 180.;
+    def->mode = comDevelop;
+    def->set_default_value(new ConfigOptionFloat(0.));
+
     def = this->add("printable_height", coFloat);
     def->label = L("Printable height");
     def->tooltip = L("This is the maximum printable height which is limited by the height of the build area.");
@@ -1837,6 +1893,78 @@ void PrintConfigDef::init_fff_params()
     def->tooltip = L("Create additional perimeter paths over steep overhangs and areas where bridges cannot be anchored.");
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionBool(false));
+
+    // Experimental non-planar settings remain disabled for existing printer profiles.
+    def = this->add("enable_nonplanar", coBool);
+    def->label = L("Experimental non-planar slicing");
+    def->category = L("Non-planar printing");
+    def->tooltip = L("Enable cut-plane authoring and non-planar build directions. Measure the printer's hotend and gantry clearances before use. Physical clearance and printing safety require separate validation.");
+    def->mode = comExpert;
+    def->set_default_value(new ConfigOptionBool(false));
+
+    def = this->add("nonplanar_hotend_cone_height", coFloat);
+    def->label = L("Hotend envelope radius");
+    def->category = L("Non-planar printing");
+    def->tooltip = L("Radius of the sphere bounding the hotend envelope around the nozzle tip. The generic default is not a measured clearance for your printer. Zero disables the hotend model and prevents non-planar G-code export.");
+    def->sidetext = L("mm");
+    def->min = 0.;
+    def->mode = comExpert;
+    def->set_default_value(new ConfigOptionFloat(40.));
+
+    struct HotendSideOption { const char *key; const char *label; };
+    for (const HotendSideOption &side : {
+        HotendSideOption{"nonplanar_hotend_angle_xpos", L("Hotend side angle +X (right)")},
+        HotendSideOption{"nonplanar_hotend_angle_xneg", L("Hotend side angle -X (left)")},
+        HotendSideOption{"nonplanar_hotend_angle_ypos", L("Hotend side angle +Y (back)")},
+        HotendSideOption{"nonplanar_hotend_angle_yneg", L("Hotend side angle -Y (front)")}}) {
+        def = this->add(side.key, coFloat);
+        def->label = side.label;
+        def->category = L("Non-planar printing");
+        def->tooltip = L("Angle of this side of the hotend envelope measured up from the bed plane with the nozzle vertical. Smaller angles describe a wider hotend. Include the fan duct, heater block, probe, and other hardware when measuring.");
+        def->sidetext = L("degrees");
+        def->min = 1.;
+        def->max = 90.;
+        def->mode = comExpert;
+        def->set_default_value(new ConfigOptionFloat(45.));
+    }
+
+    // Experimental Unlayered wave-overhangs; never silently enable for existing printer profiles.
+    def = this->add("wave_overhangs", coBool);
+    def->label = L("Experimental wave overhangs");
+    def->category = L("Quality");
+    def->tooltip = L("Experimental three-axis wave-overhang toolpaths. OFF by default. Not yet validated on Bambu A1/P2S; inspect G-code and nozzle clearances before printing.");
+    def->mode = comExpert;
+    def->set_default_value(new ConfigOptionBool(false));
+
+    def = this->add("wave_overhang_line_spacing", coFloat);
+    def->label = L("Wave line spacing");
+    def->category = L("Quality");
+    def->tooltip = L("Spacing between experimental wave-overhang traces, in millimeters.");
+    def->sidetext = L("mm");
+    def->mode = comExpert;
+    def->min = 0.15;
+    def->max = 2.0;
+    def->set_default_value(new ConfigOptionFloat(0.35));
+
+    def = this->add("wave_overhang_speed", coFloat);
+    def->label = L("Wave overhang speed");
+    def->category = L("Speed");
+    def->tooltip = L("Maximum extrusion speed for experimental wave-overhang traces. Slower filament, cooling, and overhang limits still apply. This setting does not establish printer clearance or printing safety.");
+    def->sidetext = L("mm/s");
+    def->mode = comExpert;
+    def->min = 0.1;
+    def->max = 100.0;
+    def->set_default_value(new ConfigOptionFloat(10.0));
+
+    def = this->add("wave_overhang_fan_speed", coInt);
+    def->label = L("Wave overhang fan speed");
+    def->category = L("Cooling");
+    def->tooltip = L("Part-cooling fan speed during experimental wave-overhang traces. Use -1 to follow material settings. First-layer fan overrides and layers configured without cooling still apply; ordinary cooling resumes after each trace.");
+    def->sidetext = "%";
+    def->mode = comExpert;
+    def->min = -1;
+    def->max = 100;
+    def->set_default_value(new ConfigOptionInt(-1));
 
     def = this->add("overhang_reverse", coBool);
     def->label = L("Reverse on even");

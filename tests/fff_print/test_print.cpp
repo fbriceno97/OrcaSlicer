@@ -41,6 +41,7 @@
 #include "libslic3r/Polygon.hpp"
 #include "libslic3r/Model.hpp"
 #include "libslic3r/GCodeReader.hpp"
+#include "libslic3r/GCode.hpp"
 #include "libslic3r/GCode/GCodeProcessor.hpp"
 #include "libslic3r/Exception.hpp"
 #include "libslic3r/LifecycleEvents.hpp"
@@ -48,9 +49,12 @@
 
 #include "test_helpers.hpp"
 #include "test_utils.hpp"
+#include "libslic3r/CutPlanes.hpp"
+#include "libslic3r/CutPlaneSegmentation.hpp"
 
 #include <algorithm>
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/algorithm/string/trim.hpp>
 #include <cstdlib>
 #include <sstream>
 #include <limits>
@@ -68,6 +72,250 @@
 
 using namespace Slic3r;
 using namespace Slic3r::Test;
+
+TEST_CASE("Disabled non-planar mode preserves ordinary motion despite stored cut planes", "[Print][CutPlaneSegmentation]")
+{
+    const bool sequential = GENERATE(false, true);
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"layer_change_gcode", "G92 E0"}, {"enable_nonplanar", "0"},
+        {"print_sequence", sequential ? "by object" : "by layer"}});
+    Print normal;
+    Model model;
+    init_print({cube(8.)}, normal, model, config);
+    const std::string baseline = gcode(normal);
+    CutPlane plane;
+    plane.point = Vec3d(0., 0., 4.);
+    plane.normal = Vec3d(0.2, 0., 1.).normalized();
+    model.objects.front()->cut_planes.enabled = true;
+    model.objects.front()->cut_planes.planes.push_back(plane);
+    Print authored;
+    authored.apply(model, config);
+    const std::string with_planes = gcode(authored);
+    const auto motion = [](const std::string &text) {
+        std::vector<std::string> moves;
+        GCodeReader reader;
+        reader.parse_buffer(text, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
+            if (line.cmd_is("G0") || line.cmd_is("G1") || line.cmd_is("G2") || line.cmd_is("G3")) {
+                std::string move = line.raw().substr(0, line.raw().find(';'));
+                boost::trim_right(move);
+                moves.push_back(std::move(move));
+            }
+        });
+        return moves;
+    };
+    const auto expected = motion(baseline);
+    REQUIRE_FALSE(expected.empty());
+    CHECK(motion(with_planes) == expected);
+}
+
+TEST_CASE("Editing cut planes invalidates cached slicing and blocks unsupported planar fallback", "[Print][CutPlaneSegmentation]")
+{
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"layer_change_gcode", "G92 E0"}, {"enable_nonplanar", "1"}});
+    Print print;
+    Model model;
+    init_print({cube(20.)}, print, model, config);
+    print.process();
+    REQUIRE(print.is_step_done(posSlice));
+
+    CutPlaneStack &stack = model.objects.front()->cut_planes;
+    stack.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(10., 10., 10.);
+    stack.planes.push_back(plane);
+    print.apply(model, config);
+    CHECK_FALSE(print.is_step_done(posSlice));
+    REQUIRE(print.model().objects.size() == 1);
+    CHECK(print.model().objects.front()->cut_planes == stack);
+    const StringObjectException error = print.validate();
+    CHECK_FALSE(error.string.empty());
+    CHECK(error.object == print.model().objects.front());
+    CHECK_THROWS_AS(print.process(), Slic3r::SlicingError);
+    ScopedTemporaryFile output(".gcode");
+    CHECK_THROWS_AS(print.export_gcode(output.string(), nullptr), Slic3r::SlicingError);
+
+    stack.enabled = false;
+    print.apply(model, config);
+    CHECK_NOTHROW(print.process());
+    CHECK(print.is_step_done(posSlice));
+}
+
+TEST_CASE("Cut sections retain separate instance identities and reuse unchanged plans", "[Print][CutPlaneSegmentation]")
+{
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}});
+    Print print;
+    Model model;
+    init_print({cube(20.)}, print, model, config);
+    ModelObject *object = model.objects.front();
+    object->add_instance()->set_offset(Vec3d(90., 90., 0.));
+    object->cut_planes.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(10., 10., 10.);
+    object->cut_planes.planes.push_back(plane);
+    print.apply(model, config);
+    REQUIRE(print.objects().size() == 4);
+    std::map<size_t, std::vector<int>> sections_by_instance;
+    std::vector<PrintObject *> original_plan;
+    for (PrintObject *section : print.objects()) {
+        REQUIRE(section->segment().has_value());
+        REQUIRE(section->instances().size() == 1);
+        sections_by_instance[section->nonplanar_instance_key()].push_back(section->segment_index());
+        original_plan.push_back(section);
+    }
+    REQUIRE(sections_by_instance.size() == 2);
+    const std::vector<int> expected_sections {0, 1};
+    for (const auto &entry : sections_by_instance)
+        CHECK(entry.second == expected_sections);
+    print.apply(model, config);
+    REQUIRE(print.objects().size() == original_plan.size());
+    size_t plan_index = 0;
+    for (const PrintObject *section : print.objects())
+        CHECK(section == original_plan[plan_index++]);
+    const auto ordered = sort_object_instances_by_model_order(print, true);
+    REQUIRE(ordered.size() == 4);
+    CHECK(ordered[0]->model_instance == ordered[1]->model_instance);
+    CHECK(ordered[2]->model_instance == ordered[3]->model_instance);
+    CHECK(ordered[0]->model_instance != ordered[2]->model_instance);
+    CHECK(ordered[0]->print_object->segment_index() == 0);
+    CHECK(ordered[1]->print_object->segment_index() == 1);
+    CHECK(ordered[2]->print_object->segment_index() == 0);
+    CHECK(ordered[3]->print_object->segment_index() == 1);
+    CHECK_THROWS_AS(print.process(), SlicingError);
+
+    config.set_deserialize_strict({{"enable_nonplanar", "0"}});
+    print.apply(model, config);
+    REQUIRE(print.objects().size() == 1);
+    CHECK_FALSE(print.objects().front()->segment().has_value());
+    CHECK(print.objects().front()->instances().size() == 2);
+}
+
+TEST_CASE("Section slices stay inside their model-space cut bounds", "[Print][CutPlaneSegmentation]")
+{
+    const bool tilted = GENERATE(false, true);
+    const bool compensated = GENERATE(false, true);
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"layer_height", "0.2"},
+        {"initial_layer_print_height", "0.2"}, {"zaa_enabled", "0"},
+        {"xy_contour_compensation", compensated ? "1" : "0"},
+        {"make_overhang_printable", compensated ? "1" : "0"}});
+    Print print;
+    Model model;
+    init_print({cube(20.)}, print, model, config);
+    auto &stack = model.objects.front()->cut_planes;
+    stack.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(10., 10., 10.);
+    plane.normal = Vec3d(tilted ? 0.2 : 0., 0., 1.).normalized();
+    stack.planes.push_back(plane);
+    print.apply(model, config);
+    REQUIRE(print.objects().size() == 2);
+    for (PrintObject *section : print.objects()) {
+        REQUIRE(section->segment().has_value());
+        section->slice();
+        REQUIRE_FALSE(section->layers().empty());
+        const Transform3d to_model = section->trafo_sliced().inverse();
+        size_t checked_vertices = 0;
+        for (const Layer *layer : section->layers())
+            for (const LayerRegion *region : layer->regions())
+                for (const Surface &surface : region->slices.surfaces)
+                    for (const Point &point : surface.expolygon.contour.points) {
+                        const Vec3d local = to_model * Vec3d(unscale<double>(point.x()), unscale<double>(point.y()), layer->slice_z);
+                        for (const CutSegmentClip &clip : section->segment()->clips)
+                            CHECK(clip.normal.dot(local) <= clip.offset + 0.01);
+                        ++checked_vertices;
+                    }
+        CHECK(checked_vertices > 0);
+        if (!tilted) {
+            CHECK(section->layers().size() == 50);
+            CHECK_THAT(section->layers().back()->print_z, Catch::Matchers::WithinAbs(10., 0.001));
+        }
+    }
+    // Mesh slicing is exercised directly until world-space emission is integrated.
+    CHECK_THROWS_AS(print.process(), SlicingError);
+}
+
+TEST_CASE("Directed parts retain modifier bindings without slicing another section's material", "[Print][CutPlaneSegmentation]")
+{
+    const double direction_angle = GENERATE(0., 20.);
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"layer_height", "0.2"},
+        {"initial_layer_print_height", "0.2"}});
+    Print print;
+    Model model;
+    init_print({cube(20.)}, print, model, config);
+    ModelObject *object = model.objects.front();
+    TriangleMesh part = cube(10.);
+    part.translate(30.f, 0.f, 0.f);
+    ModelVolume *directed = object->add_volume(std::move(part));
+    directed->config.set_key_value("layer_rotation_b", new ConfigOptionFloat(direction_angle));
+    TriangleMesh hole = make_cube(5., 5., 22.);
+    hole.translate(5.f, 5.f, -1.f);
+    object->add_volume(std::move(hole))->set_type(ModelVolumeType::NEGATIVE_VOLUME);
+    print.apply(model, config);
+    REQUIRE(print.objects().size() == 2);
+    for (PrintObject *section : print.objects()) {
+        REQUIRE(section->segment().has_value());
+        section->slice();
+        REQUIRE_FALSE(section->layers().empty());
+        const bool owns_directed_part = section->segment()->part_volume == directed->id();
+        const double min_x = owns_directed_part ? 30. : 0.;
+        const double max_x = owns_directed_part ? 40. : 20.;
+        const Transform3d to_model = section->trafo_sliced().inverse();
+        size_t checked_vertices = 0;
+        bool has_hole = false;
+        for (const Layer *layer : section->layers())
+            for (const LayerRegion *region : layer->regions())
+                for (const Surface &surface : region->slices.surfaces) {
+                    has_hole = has_hole || !surface.expolygon.holes.empty();
+                    for (const Point &point : surface.expolygon.contour.points) {
+                        const Vec3d local = to_model * Vec3d(unscale<double>(point.x()), unscale<double>(point.y()), layer->slice_z);
+                        CHECK(local.x() >= min_x - 0.01);
+                        CHECK(local.x() <= max_x + 0.01);
+                        ++checked_vertices;
+                    }
+                }
+        CHECK(checked_vertices > 0);
+        CHECK(has_hole == !owns_directed_part);
+    }
+    CHECK_THROWS_AS(print.process(), SlicingError);
+}
+
+TEST_CASE("Whole-object directions slice above the physical bed without mutating the model", "[Print][CutPlaneSegmentation]")
+{
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"layer_height", "0.2"},
+        {"initial_layer_print_height", "0.2"}});
+    Print print;
+    Model model;
+    init_print({cube(20.)}, print, model, config);
+    model.objects.front()->config.set_key_value("layer_rotation_b", new ConfigOptionFloat(-20.));
+    model.objects.front()->config.set_key_value("layer_rotation_c", new ConfigOptionFloat(30.));
+    print.apply(model, config);
+    REQUIRE(print.objects().size() == 1);
+    PrintObject *section = print.get_object(0);
+    REQUIRE(section->segment().has_value());
+    section->slice();
+    REQUIRE_FALSE(section->layers().empty());
+    const Transform3d to_model = section->trafo_sliced().inverse();
+    size_t checked_vertices = 0;
+    for (const Layer *layer : section->layers())
+        for (const LayerRegion *region : layer->regions())
+            for (const Surface &surface : region->slices.surfaces)
+                for (const Point &point : surface.expolygon.contour.points) {
+                    const Vec3d local = to_model * Vec3d(unscale<double>(point.x()), unscale<double>(point.y()), layer->slice_z);
+                    const Vec3d placed = section->trafo() * local;
+                    CHECK(placed.z() >= -0.01);
+                    CHECK(local.x() >= -0.01);
+                    CHECK(local.x() <= 20.01);
+                    CHECK(local.y() >= -0.01);
+                    CHECK(local.y() <= 20.01);
+                    ++checked_vertices;
+                }
+    CHECK(checked_vertices > 0);
+    CHECK(model.objects.front()->cut_planes.planes.empty());
+    CHECK_THROWS_AS(print.process(), SlicingError);
+}
 
 TEST_CASE("Timelapse g-code is emitted once per layer for Bambu and non-Bambu printers", "[Print][Regression]")
 {

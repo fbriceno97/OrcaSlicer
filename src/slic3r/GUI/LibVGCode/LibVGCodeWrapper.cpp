@@ -32,6 +32,7 @@
 #include "libslic3r/PrintConfig.hpp"
 #include "../../src/libvgcode/include/GCodeInputData.hpp"
 #include "../../src/libvgcode/include/PathVertex.hpp"
+#include "libvgcode/include/SectionPreview.hpp"
 #include "libvgcode/include/Types.hpp"
 #include "libslic3r/Config.hpp"
 #include "libslic3r/Model.hpp"
@@ -760,6 +761,7 @@ static void convert_object_to_vertices(const Slic3r::PrintObject& object, const 
         assert(it != data.layers_zs.end());
         const size_t layer_id = (it != data.layers_zs.end()) ? std::distance(data.layers_zs.begin(), it) : 0;
         for (const Slic3r::PrintInstance& instance : object.instances()) {
+            const size_t instance_vertices_begin = data.vertices.size();
             const Slic3r::Point& copy = instance.shift;
             for (const Slic3r::LayerRegion* layerm : layer->regions()) {
                 if (layerm->slices.empty())
@@ -791,10 +793,8 @@ static void convert_object_to_vertices(const Slic3r::PrintObject& object, const 
                     }
                 }
             }
-            if (has_support) {
-                const Slic3r::SupportLayer* support_layer = dynamic_cast<const Slic3r::SupportLayer*>(layer);
-                if (support_layer == nullptr)
-                    continue;
+            if (const auto *support_layer = dynamic_cast<const Slic3r::SupportLayer*>(layer);
+                has_support && support_layer != nullptr) {
                 const Slic3r::PrintObjectConfig& cfg = support_layer->object()->config();
                 for (const Slic3r::ExtrusionEntity* extrusion_entity : support_layer->support_fills.entities) {
                     const bool is_support_material = extrusion_entity->role() == Slic3r::ExtrusionRole::erSupportMaterial;
@@ -807,12 +807,26 @@ static void convert_object_to_vertices(const Slic3r::PrintObject& object, const 
                                         copy, data.vertices);
                 }
             }
+            if (object.segment()) {
+                // The conversion above adds the copy's XY shift to slice-frame
+                // vertices. Undo that shift before restoring world geometry,
+                // including this section's tilt and rebased Z. Preview is in
+                // world coordinates, without machine/nozzle calibration.
+                const Slic3r::Vec3d shift(Slic3r::unscale<double>(copy.x()), Slic3r::unscale<double>(copy.y()), 0.);
+                const Slic3r::Transform3d to_world = instance.get_slice_to_world_transform() * Eigen::Translation3d(-shift);
+                for (size_t index = instance_vertices_begin; index < data.vertices.size(); ++index) {
+                    const Slic3r::Vec3f sliced = convert(data.vertices[index].position);
+                    data.vertices[index].position = convert(Slic3r::Vec3f((to_world * sliced.cast<double>()).cast<float>()));
+                }
+            }
         }
         // filter out empty layers
         const size_t new_vertices_count = data.vertices.size();
-        if (new_vertices_count == old_vertices_count)
+        if (!object.segment() && new_vertices_count == old_vertices_count)
             data.layers_zs.erase(data.layers_zs.begin() + layer_id);
     }
+    if (object.segment())
+        compact_section_layers(data.vertices, data.layers_zs);
 }
 
 static void convert_objects_to_vertices(const Slic3r::ConstPrintObjectPtrsAdaptor& objects, const std::vector<std::string>& str_tool_colors,
@@ -855,21 +869,35 @@ GCodeInputData convert(const Slic3r::Print& print, const std::vector<std::string
     // We need to collect vertices in the first layer for all objects, push them into the output vector
     // and then do the same for all the layers. The algorithm relies on the fact that the vertices from
     // lower layers are always placed after vertices from the higher layer.
-    std::vector<size_t> vert_indices(data.size(), 0);
-    for (size_t layer_id = 0; layer_id < layers.size(); ++layer_id) {
-        const float layer_z = layers[layer_id];
-        for (size_t obj_idx = 0; obj_idx < data.size(); ++obj_idx) {
-            // d contains PathVertices for one object. Let's stuff everything below this layer_z into ret.vertices.
-            const size_t start_idx = vert_indices[obj_idx];
-            size_t idx = start_idx;
-            while (idx < data[obj_idx].vertices.size() && data[obj_idx].vertices[idx].position[2] <= layer_z)
-                ++idx;
-            // We have found a vertex above current layer_z. Let's copy the vertices into the output
-            // and remember where to start when we process another layer.
-            ret.vertices.insert(ret.vertices.end(),
-                                data[obj_idx].vertices.begin() + start_idx,
-                                data[obj_idx].vertices.begin() + idx);
-            vert_indices[obj_idx] = idx;
+    const auto objects = print.objects();
+    const bool has_sections = std::any_of(objects.begin(), objects.end(), [](const Slic3r::PrintObject *object) {
+        return object->segment().has_value();
+    });
+    if (has_sections) {
+        // Tilted/rebased sections have no single world Z for a local layer.
+        // Merging by position[2] would truncate tilted paths and drop an upper
+        // section entirely when its physical Z exceeds its local layer range.
+        // Keep each section's layer order and give it a distinct slider range.
+        uint32_t layer_offset = 0;
+        for (const VerticesData &d : data)
+            layer_offset = append_section_vertices(ret.vertices, d.vertices, layer_offset);
+    } else {
+        std::vector<size_t> vert_indices(data.size(), 0);
+        for (size_t layer_id = 0; layer_id < layers.size(); ++layer_id) {
+            const float layer_z = layers[layer_id];
+            for (size_t obj_idx = 0; obj_idx < data.size(); ++obj_idx) {
+                // d contains PathVertices for one object. Let's stuff everything below this layer_z into ret.vertices.
+                const size_t start_idx = vert_indices[obj_idx];
+                size_t idx = start_idx;
+                while (idx < data[obj_idx].vertices.size() && data[obj_idx].vertices[idx].position[2] <= layer_z)
+                    ++idx;
+                // We have found a vertex above current layer_z. Let's copy the vertices into the output
+                // and remember where to start when we process another layer.
+                ret.vertices.insert(ret.vertices.end(),
+                                    data[obj_idx].vertices.begin() + start_idx,
+                                    data[obj_idx].vertices.begin() + idx);
+                vert_indices[obj_idx] = idx;
+            }
         }
     }
 

@@ -7,6 +7,9 @@
 #include <catch2/generators/catch_generators.hpp>
 #include "catch2/catch_approx.hpp"
 #include "libslic3r/PrintConfig.hpp"
+#include "libslic3r/HotendEnvelope.hpp"
+#include <limits>
+#include <stdexcept>
 #include "libslic3r/PrintConfigConstants.hpp"
 #include "libslic3r/LocalesUtils.hpp"
 
@@ -33,6 +36,26 @@
 #include <catch2/matchers/catch_matchers_vector.hpp>
 
 using namespace Slic3r;
+
+TEST_CASE("Printer envelopes retain asymmetric clearances while non-planar mode defaults off", "[Config][Nonplanar]")
+{
+    FullPrintConfig config;
+    CHECK_FALSE(config.enable_nonplanar.value);
+    config.nonplanar_hotend_cone_height.value = 25.;
+    config.nonplanar_hotend_angle_xpos.value = 80.;
+    config.nonplanar_hotend_angle_xneg.value = 30.;
+    config.nonplanar_hotend_angle_ypos.value = 60.;
+    config.nonplanar_hotend_angle_yneg.value = 45.;
+    const HotendEnvelope envelope = HotendEnvelope::from_config(config);
+    CHECK_THAT(envelope.height, Catch::Matchers::WithinAbs(25., 1e-9));
+    CHECK_THAT(envelope.angle[HotendEnvelope::XPos], Catch::Matchers::WithinAbs(80., 1e-9));
+    CHECK_THAT(envelope.angle[HotendEnvelope::XNeg], Catch::Matchers::WithinAbs(30., 1e-9));
+    CHECK_THAT(envelope.angle[HotendEnvelope::YPos], Catch::Matchers::WithinAbs(60., 1e-9));
+    CHECK_THAT(envelope.angle[HotendEnvelope::YNeg], Catch::Matchers::WithinAbs(45., 1e-9));
+    config.nonplanar_hotend_cone_height.value = std::numeric_limits<double>::quiet_NaN();
+    CHECK_THROWS_AS(HotendEnvelope::from_config(config), std::invalid_argument);
+    CHECK(validate(config).count("nonplanar_hotend_cone_height") == 1);
+}
 
 SCENARIO("Generic config validation performs as expected.", "[Config]") {
     GIVEN("A config generated from default options") {

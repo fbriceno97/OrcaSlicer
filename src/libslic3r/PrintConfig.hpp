@@ -20,6 +20,7 @@
 #include "libslic3r.h"
 #include "CommonDefs.hpp"
 #include "Config.hpp"
+#include "HotendEnvelope.hpp"
 #include "Polygon.hpp"
 #include <boost/container_hash/hash.hpp>
 #include <algorithm>
@@ -47,6 +48,9 @@
 namespace Slic3r {
 
 class DynamicPrintConfig;
+
+// Rows are the toolhead's +X, +Y and nozzle axis in the bed frame.
+Matrix3d tool_head_frame(const Vec3d &tool_axis);
 
 enum GCodeFlavor : unsigned char {
     gcfMarlinLegacy, 
@@ -118,6 +122,9 @@ enum class WipeTowerType {
 enum PrintHostType {
     htPrusaLink, htPrusaConnect, htOctoPrint, htDuet, htUltiMaker, htFlashAir, htAstroBox, htRepetier, htMKS, htESP3D, htCrealityPrint, htObico, htFlashforge, htSimplyPrint, htElegooLink, ht3DPrinterOS, htMoonraker
 };
+
+// Unlayered wave-overhang generator patterns (ported under AGPL-3.0-or-later).
+enum class WaveOverhangPattern : int { Monotonic, ZigZag, Smart };
 
 enum AuthorizationType {
     atKeyPassword, atUserPassword
@@ -1580,6 +1587,11 @@ PRINT_CONFIG_CLASS_DEFINE(
     // Orca
     ((ConfigOptionBool,                 make_overhang_printable))
     ((ConfigOptionBool,                 extra_perimeters_on_overhangs))
+    // Experimental wave-overhangs: OFF by default; three-axis Windows prototype.
+    ((ConfigOptionBool,                 wave_overhangs))
+    ((ConfigOptionFloat,                wave_overhang_line_spacing))
+    ((ConfigOptionFloat,                wave_overhang_speed))
+    ((ConfigOptionInt,                  wave_overhang_fan_speed))
     ((ConfigOptionBoolsNullable,        slowdown_for_curled_perimeters))
     ((ConfigOptionBool,                 hole_to_polyhole))
     ((ConfigOptionFloatOrPercent,       hole_to_polyhole_threshold))
@@ -1626,6 +1638,13 @@ PRINT_CONFIG_CLASS_DEFINE(
 
 PRINT_CONFIG_CLASS_DEFINE(
     MachineEnvelopeConfig,
+
+    ((ConfigOptionBool,                enable_nonplanar))
+    ((ConfigOptionFloat,               nonplanar_hotend_cone_height))
+    ((ConfigOptionFloat,               nonplanar_hotend_angle_xpos))
+    ((ConfigOptionFloat,               nonplanar_hotend_angle_xneg))
+    ((ConfigOptionFloat,               nonplanar_hotend_angle_ypos))
+    ((ConfigOptionFloat,               nonplanar_hotend_angle_yneg))
 
     // Orca: whether emit machine limits into the beginning of the G-code.
     ((ConfigOptionBool,                 emit_machine_limits_to_gcode))

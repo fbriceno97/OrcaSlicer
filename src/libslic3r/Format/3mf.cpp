@@ -1,6 +1,7 @@
 #include "../libslic3r.h"
 #include "../Exception.hpp"
 #include "../Model.hpp"
+#include "../CutPlanes.hpp"
 #include "../Utils.hpp"
 #include "../LocalesUtils.hpp"
 #include "../Geometry.hpp"
@@ -942,6 +943,14 @@ ModelVolumeType type_from_string(const std::string &s)
                 for (const Metadata& metadata : obj_metadata->second.metadata) {
                     if (metadata.key == "name")
                         model_object->name = metadata.value;
+                    else if (metadata.key == cut_planes_metadata_key) {
+                        try {
+                            model_object->cut_planes = cut_plane_stack_from_json(metadata.value);
+                        } catch (const std::exception &error) {
+                            add_error(std::string("Invalid cut-plane metadata: ") + error.what());
+                            return false;
+                        }
+                    }
                     else
                         model_object->config.set_deserialize(metadata.key, metadata.value, config_substitutions);
                 }
@@ -2093,11 +2102,14 @@ ModelVolumeType type_from_string(const std::string &s)
             "source_offset_y",
             "source_offset_z",
             "extruder",
-            "modifier"
+            "modifier",
+            "layer_rotation_b",
+            "layer_rotation_c"
         };
 
         auto itor = std::find(valid_keys.begin(), valid_keys.end(), key);
-        if (itor == valid_keys.end() && !(type == VOLUME_TYPE && boost::starts_with(key, PRECISE_SEAM_CONFIG_PREFIX))) {
+        const bool cut_plane_metadata = type == OBJECT_TYPE && key == cut_planes_metadata_key;
+        if (itor == valid_keys.end() && !cut_plane_metadata && !(type == VOLUME_TYPE && boost::starts_with(key, PRECISE_SEAM_CONFIG_PREFIX))) {
             // do nothing if not valid keys
             return true;
         }
@@ -3174,6 +3186,11 @@ ModelVolumeType type_from_string(const std::string &s)
                 // stores object's name
                 if (!obj->name.empty())
                     stream << "  <" << METADATA_TAG << " " << TYPE_ATTR << "=\"" << OBJECT_TYPE << "\" " << KEY_ATTR << "=\"name\" " << VALUE_ATTR << "=\"" << xml_escape(obj->name) << "\"/>\n";
+
+                if (!obj->cut_planes.empty() || obj->cut_planes.enabled || obj->cut_planes.user_ordered)
+                    stream << "  <" << METADATA_TAG << " " << TYPE_ATTR << "=\"" << OBJECT_TYPE << "\" "
+                           << KEY_ATTR << "=\"" << cut_planes_metadata_key << "\" " << VALUE_ATTR << "=\""
+                           << xml_escape(cut_plane_stack_to_json(obj->cut_planes)) << "\"/>\n";
 
                 // stores object's config data
                 for (const std::string& key : obj->config.keys()) {

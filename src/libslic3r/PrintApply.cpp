@@ -4,6 +4,8 @@
 #include "CustomGCode.hpp"
 #include "Config.hpp"
 #include "Model.hpp"
+#include "CutPlanes.hpp"
+#include "CutPlaneSegmentation.hpp"
 #include "Point.hpp"
 #include "Polygon.hpp"
 #include "Print.hpp"
@@ -17,6 +19,8 @@
 #include "TriangleSelector.hpp"
 
 #include <algorithm>
+#include <optional>
+#include <tuple>
 #include <array>
 #include <boost/log/trivial.hpp>
 #include <cassert>
@@ -184,12 +188,27 @@ struct PrintObjectTrafoAndInstances
 {
     Transform3d    	trafo;
     PrintInstances	instances;
-    bool operator<(const PrintObjectTrafoAndInstances &rhs) const { return transform3d_lower(this->trafo, rhs.trafo); }
+    size_t instance_key {0};
+    int segment_index {-1};
+    std::optional<CutSegmentDescriptor> segment;
+    bool operator<(const PrintObjectTrafoAndInstances &rhs) const {
+        if (!transform3d_equal(trafo, rhs.trafo))
+            return transform3d_lower(trafo, rhs.trafo);
+        return std::tie(instance_key, segment_index) < std::tie(rhs.instance_key, rhs.segment_index);
+    }
 };
+
+template<class Left, class Right>
+static bool print_object_key_less(const Left &lhs, const Right &rhs)
+{
+    if (!transform3d_equal(lhs.trafo, rhs.trafo))
+        return transform3d_lower(lhs.trafo, rhs.trafo);
+    return std::tie(lhs.instance_key, lhs.segment_index) < std::tie(rhs.instance_key, rhs.segment_index);
+}
 
 // Generate a list of trafos and XY offsets for instances of a ModelObject
 // Orca: Updated to include XYZ filament shrinkage compensation
-static std::vector<PrintObjectTrafoAndInstances> print_objects_from_model_object(const ModelObject &model_object, const Vec3d &shrinkage_compensation, bool force_separate_instances = false)
+static std::vector<PrintObjectTrafoAndInstances> print_objects_from_model_object(const ModelObject &model_object, const Vec3d &shrinkage_compensation, bool force_separate_instances, bool enable_nonplanar, const Vec3d &root_build_normal)
 {
     std::set<PrintObjectTrafoAndInstances> trafos;
     PrintObjectTrafoAndInstances           trafo;
@@ -206,6 +225,10 @@ static std::vector<PrintObjectTrafoAndInstances> print_objects_from_model_object
             // Reset the XY axes of the transformation.
             trafo.trafo.data()[12] = 0;
             trafo.trafo.data()[13] = 0;
+            // A tilted section's frame pivots around its own instance placement.
+            // Keep copies distinct using identity, without perturbing their geometry.
+            trafo.instance_key = enable_nonplanar && (model_object.cut_planes.active() || object_has_directed_parts(model_object) || object_has_build_direction(model_object))
+                ? model_instance->id().id : 0;
             // Belt printer global mode: prevent instance grouping so each
             // copy gets its own PrintObject with independent layer Z values.
             // Add a tiny unique perturbation to the existing Z (don't replace
@@ -225,7 +248,22 @@ static std::vector<PrintObjectTrafoAndInstances> print_objects_from_model_object
     }
 
     //BOOST_LOG_TRIVIAL(info) << __FUNCTION__ << boost::format(", Line %1%: got %2% print objects")%__LINE__ %trafos.size();
-    return std::vector<PrintObjectTrafoAndInstances>(trafos.begin(), trafos.end());
+    std::vector<PrintObjectTrafoAndInstances> result;
+    for (const auto &base : trafos) {
+        const auto segments = enable_nonplanar
+            ? derive_cut_segments(model_object, base.trafo, 0., nullptr, nullptr, root_build_normal)
+            : std::vector<CutSegmentDescriptor>{};
+        if (segments.empty())
+            result.push_back(base);
+        else
+            for (const auto &segment : segments) {
+                auto entry = base;
+                entry.segment_index = segment.index;
+                entry.segment = segment;
+                result.push_back(std::move(entry));
+            }
+    }
+    return result;
 }
 
 // Compare just the layer ranges and their layer heights, not the associated configs.
@@ -555,6 +593,8 @@ struct PrintObjectStatus {
         id(print_object->model_object()->id()),
         print_object(print_object),
         trafo(print_object->trafo()),
+        instance_key(print_object->nonplanar_instance_key()),
+        segment_index(print_object->segment_index()),
         status(status) {}
     PrintObjectStatus(ObjectID id) : id(id), print_object(nullptr), trafo(Transform3d::Identity()), status(Unknown) {}
 
@@ -564,6 +604,8 @@ struct PrintObjectStatus {
     PrintObject     *print_object;
     // Trafo generated with model_object->world_matrix(true)
     Transform3d      trafo;
+    size_t           instance_key {0};
+    int              segment_index {-1};
     Status           status;
 
     // Search by id.
@@ -1822,6 +1864,7 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
         bool precise_seam_differ        = model_volume_list_changed(model_object, model_object_new, precise_seam_types);
         bool layer_height_ranges_differ = ! layer_height_ranges_equal(model_object.layer_config_ranges, model_object_new.layer_config_ranges, model_object_new.layer_height_profile.empty());
         bool model_origin_translation_differ = model_object.origin_translation != model_object_new.origin_translation;
+        const bool cut_planes_differ = model_object.cut_planes != model_object_new.cut_planes;
         bool brim_points_differ = model_brim_points_data_changed(model_object, model_object_new);
         auto print_objects_range        = print_object_status_db.get_range(model_object);
         // The list actually can be empty if all instances are out of the print bed.
@@ -1831,11 +1874,11 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
             model_object_status.print_object_regions = print_objects_range.begin()->print_object->m_shared_regions;
             model_object_status.print_object_regions->ref_cnt_inc();
         }
-        if (solid_or_modifier_differ || model_origin_translation_differ || layer_height_ranges_differ ||
+        if (solid_or_modifier_differ || model_origin_translation_differ || layer_height_ranges_differ || cut_planes_differ ||
             ! model_object.layer_height_profile.timestamp_matches(model_object_new.layer_height_profile)) {
             // The very first step (the slicing step) is invalidated. One may freely remove all associated PrintObjects.
             model_object_status.print_object_regions_status =
-                model_object_status.print_object_regions == nullptr || model_origin_translation_differ || layer_height_ranges_differ ?
+                model_object_status.print_object_regions == nullptr || model_origin_translation_differ || layer_height_ranges_differ || cut_planes_differ ?
                 // Drop print_objects_regions.
                 ModelObjectStatus::PrintObjectRegionsStatus::Invalid :
                 // Reuse bounding boxes of print_objects_regions for ModelVolumes with unmodified transformation.
@@ -1951,7 +1994,11 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
             // Belt printers: force each instance into its own PrintObject so each
             // gets independent layer Z values (its bed position is folded into them).
             bool belt_force_separate = m_config.belt_printer.value;
-            model_object_status.print_instances = print_objects_from_model_object(*model_object, this->shrinkage_compensation(), belt_force_separate);
+            const Vec3d root_build_normal = m_config.belt_printer.value
+                ? Vec3d(BeltTransformPipeline::build_rotation_matrix(m_config).transpose() * Vec3d::UnitZ())
+                : Vec3d(Vec3d::UnitZ());
+            model_object_status.print_instances = print_objects_from_model_object(*model_object, this->shrinkage_compensation(),
+                belt_force_separate, m_config.enable_nonplanar.value, root_build_normal);
             std::vector<const PrintObjectStatus*> old;
             old.reserve(print_object_status_db.count(*model_object));
             for (const PrintObjectStatus &print_object_status : print_object_status_db.get_range(*model_object))
@@ -1970,6 +2017,8 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
                 // Simple case, just generate new instances.
                 for (PrintObjectTrafoAndInstances &print_instances : model_object_status.print_instances) {
                     PrintObject *print_object = new PrintObject(this, model_object, print_instances.trafo, std::move(print_instances.instances));
+                    print_object->m_segment = std::move(print_instances.segment);
+                    print_object->m_nonplanar_instance_key = print_instances.instance_key;
                     print_object_apply_config(print_object);
                     print_objects_new.emplace_back(print_object);
                     // print_object_status.emplace(PrintObjectStatus(print_object, PrintObjectStatus::New));
@@ -1979,14 +2028,16 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
             }
             // Complex case, try to merge the two lists.
             // Sort the old lexicographically by their trafos.
-            std::sort(old.begin(), old.end(), [](const PrintObjectStatus *lhs, const PrintObjectStatus *rhs){ return transform3d_lower(lhs->trafo, rhs->trafo); });
+            std::sort(old.begin(), old.end(), [](const PrintObjectStatus *lhs, const PrintObjectStatus *rhs){ return print_object_key_less(*lhs, *rhs); });
             // Merge the old / new lists.
             auto it_old = old.begin();
             for (PrintObjectTrafoAndInstances &new_instances : model_object_status.print_instances) {
-				for (; it_old != old.end() && transform3d_lower((*it_old)->trafo, new_instances.trafo); ++ it_old);
-				if (it_old == old.end() || ! transform3d_equal((*it_old)->trafo, new_instances.trafo)) {
+				for (; it_old != old.end() && print_object_key_less(**it_old, new_instances); ++ it_old);
+				if (it_old == old.end() || print_object_key_less(new_instances, **it_old)) {
                     // This is a new instance (or a set of instances with the same trafo). Just add it.
                     PrintObject *print_object = new PrintObject(this, model_object, new_instances.trafo, std::move(new_instances.instances));
+                    print_object->m_segment = std::move(new_instances.segment);
+                    print_object->m_nonplanar_instance_key = new_instances.instance_key;
                     print_object_apply_config(print_object);
                     print_objects_new.emplace_back(print_object);
                     // print_object_status.emplace(PrintObjectStatus(print_object, PrintObjectStatus::New));
@@ -2000,6 +2051,10 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
                         size_t extruder_num = new_full_config.option<ConfigOptionFloats>("nozzle_diameter")->size();
                         update_apply_status(status == PrintBase::APPLY_STATUS_INVALIDATED);
                         belt_instances_shifted = true;
+                    }
+                    if ((*it_old)->print_object->m_segment != new_instances.segment) {
+                        update_apply_status((*it_old)->print_object->invalidate_all_steps());
+                        (*it_old)->print_object->m_segment = std::move(new_instances.segment);
                     }
 					print_objects_new.emplace_back((*it_old)->print_object);
 					const_cast<PrintObjectStatus*>(*it_old)->status = PrintObjectStatus::Reused;

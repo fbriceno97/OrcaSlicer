@@ -5,12 +5,17 @@
 #include "libslic3r/Model.hpp"
 #include "libslic3r/Print.hpp"
 #include "libslic3r/PrintConfig.hpp"
+#include "libslic3r/Point.hpp"
+#include <utility>
+#include <cmath>
 
 #include "test_utils.hpp"
 
 #include <cstddef>
 #include <fstream>
 #include <initializer_list>
+#include <map>
+#include <algorithm>
 #include <string>
 #include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -22,6 +27,19 @@ using namespace Slic3r;
 using Catch::Matchers::WithinAbs;
 
 namespace {
+
+void process_text(GCodeProcessor &processor, const std::string &text, bool preserve_preparation_z = false)
+{
+    ScopedTemporaryFile file(".gcode");
+    {
+        std::ofstream output(file.string());
+        output << text;
+    }
+    processor.reset();
+    processor.apply_config(FullPrintConfig{});
+    processor.preserve_preparation_z(preserve_preparation_z);
+    processor.process_file(file.string());
+}
 
 float processed_belt_tilt(const std::string &gcode)
 {
@@ -39,6 +57,128 @@ float processed_belt_tilt(const std::string &gcode)
 constexpr const char *body = "G1 X10 Y10 Z0.2 F3000\nG1 X20 Y10 E1 F1200\n";
 
 } // namespace
+
+TEST_CASE("Section and build-axis metadata follow the emitted moves", "[GCodeProcessor][Nonplanar]")
+{
+    GCodeProcessor processor;
+    process_text(processor,
+        "G90\nM83\nT0\n;TYPE:Outer wall\nG1 X0 Y0 Z1 F3000\n"
+        "; TOOL_AXIS:0,0,2\n;SEGMENT_ID:0\nG1 X10 E1 F1200\n"
+        "; TOOL_AXIS:1,0,1\n;SEGMENT_ID:1\nG1 X20 Z2 E1\n"
+        "; TOOL_AXIS:0,0,1\n;SEGMENT_ID:-1\nG1 X30 E1\n");
+    const auto &result = processor.get_result();
+    REQUIRE(result.nonplanar_metadata_valid);
+    REQUIRE(result.tool_axes.size() == 2);
+    std::map<unsigned, size_t> extrusion_commands;
+    for (const auto &move : result.moves) {
+        if (move.type != EMoveType::Extrude || move.delta_extruder <= 0.f)
+            continue;
+        REQUIRE(move.tool_axis_id < result.tool_axes.size());
+        // Time processing can split one extrusion into acceleration/cruise/
+        // deceleration vertices. Every vertex must retain its source tags.
+        const size_t extrusion = extrusion_commands.try_emplace(move.gcode_id, extrusion_commands.size()).first->second;
+        if (extrusion == 0) {
+            CHECK(move.cut_segment_id == 0);
+            CHECK(move.tool_axis_id == 0);
+        } else if (extrusion == 1) {
+            CHECK(move.cut_segment_id == 1);
+            CHECK_THAT(result.tool_axes[move.tool_axis_id].z(), WithinAbs(std::sqrt(0.5f), 1e-6f));
+        } else {
+            CHECK(move.cut_segment_id == -1);
+            CHECK(move.tool_axis_id == 0);
+        }
+    }
+    CHECK(extrusion_commands.size() == 3);
+
+    GCodeProcessorResult copied;
+    copied = result;
+    CHECK(copied.tool_axes == result.tool_axes);
+    GCodeProcessorResult moved;
+    moved = std::move(copied);
+    CHECK(moved.tool_axes == result.tool_axes);
+    REQUIRE(moved.moves.size() == result.moves.size());
+    CHECK(moved.moves.back().cut_segment_id == -1);
+}
+
+TEST_CASE("Section travel retains physical Z during the custom start stage", "[GCodeProcessor][Nonplanar]")
+{
+    GCodeProcessor processor;
+    process_text(processor, "G90\n; FEATURE: Custom\n;SEGMENT_ID:0\nG1 X10 Y10 Z20 F1200\n");
+    REQUIRE(processor.get_result().nonplanar_metadata_valid);
+    float maximum_z = 0.f;
+    for (const auto &move : processor.get_result().moves)
+        if (move.type == EMoveType::Travel)
+            maximum_z = std::max(maximum_z, move.position.z());
+    CHECK_THAT(maximum_z, WithinAbs(20.f, 1e-6f));
+}
+
+TEST_CASE("Collision processing retains unannotated preparation travel at its physical height", "[GCodeProcessor][Nonplanar]")
+{
+    GCodeProcessor processor;
+    process_text(processor, "G90\n;TYPE:Custom\nG1 X10 Y10 Z20 F1200\n", true);
+    float maximum_z = 0.f;
+    for (const auto &move : processor.get_result().moves)
+        if (move.type == EMoveType::Travel)
+            maximum_z = std::max(maximum_z, move.position.z());
+    CHECK_THAT(maximum_z, WithinAbs(20.f, 1e-6f));
+}
+
+TEST_CASE("Motion results preserve calibration on assignment and reset to neutral", "[GCodeProcessor][Nonplanar]")
+{
+    GCodeProcessorResult result;
+    CHECK(result.z_offset == 0.f);
+    result.z_offset = 12.f;
+    GCodeProcessorResult copied;
+    copied = result;
+    CHECK(copied.z_offset == 12.f);
+    GCodeProcessorResult moved;
+    moved.z_offset = -3.f;
+    moved = std::move(copied);
+    CHECK(moved.z_offset == 12.f);
+    result.reset();
+    CHECK(result.z_offset == 0.f);
+}
+
+TEST_CASE("Preparation display height changes only when physical processing is requested", "[GCodeProcessor][Nonplanar]")
+{
+    const bool preserve = GENERATE(false, true);
+    FullPrintConfig config;
+    config.initial_layer_print_height.value = 0.25;
+    GCodeProcessor processor;
+    processor.apply_config(config);
+    processor.preserve_preparation_z(preserve);
+    processor.initialize_result_moves();
+    processor.process_buffer("G90\n; FEATURE: Custom\nG1 X10 Y10 Z20 F1200\n");
+    processor.finalize(false);
+    float maximum_z = 0.f;
+    for (const auto &move : processor.get_result().moves)
+        if (move.type == EMoveType::Travel)
+            maximum_z = std::max(maximum_z, move.position.z());
+    CHECK_THAT(maximum_z, WithinAbs(preserve ? 20.f : 0.25f, 1e-6f));
+}
+
+TEST_CASE("Reprocessing ordinary G-code clears earlier section metadata", "[GCodeProcessor][Nonplanar]")
+{
+    GCodeProcessor processor;
+    process_text(processor, ";TOOL_AXIS:1,0,1\n;SEGMENT_ID:4\nG1 X10 Y10 Z2 F1200\n");
+    REQUIRE(processor.get_result().tool_axes.size() == 2);
+    process_text(processor, "G1 X10 Y10 Z2 F1200\n");
+    REQUIRE(processor.get_result().tool_axes.size() == 1);
+    CHECK(processor.get_result().nonplanar_metadata_valid);
+    for (const auto &move : processor.get_result().moves) {
+        CHECK(move.cut_segment_id == -1);
+        CHECK(move.tool_axis_id == 0);
+    }
+}
+
+TEST_CASE("Malformed non-planar metadata prevents a clearance approval", "[GCodeProcessor][Nonplanar]")
+{
+    const std::string tag = GENERATE(";TOOL_AXIS:0,0,0\n", ";TOOL_AXIS:nan,0,1\n", ";TOOL_AXIS:1,2\n",
+                                     ";SEGMENT_ID:-2\n", ";SEGMENT_ID:2147483648\n");
+    GCodeProcessor processor;
+    process_text(processor, tag + "G1 X10 Y10 Z2 F1200\n");
+    CHECK_FALSE(processor.get_result().nonplanar_metadata_valid);
+}
 
 TEST_CASE("The config block's belt angle does not mark G-code as belt G-code", "[GCodeProcessor][belt]")
 {

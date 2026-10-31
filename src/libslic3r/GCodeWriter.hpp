@@ -19,6 +19,7 @@
 #include "Config.hpp"
 #include "GCode/MachineKinematics.hpp"
 #include <memory>
+#include <optional>
 
 namespace Slic3r {
 
@@ -121,6 +122,10 @@ public:
     const Vec3d& get_position() const { return m_pos; }
     Vec3d&       get_position() { return m_pos; }
     void        set_position(const Vec3d& in) { m_pos = in; }
+    // Section exports exchange raw macro positions in machine coordinates,
+    // including between frames. Ordinary exports retain their existing convention.
+    Vec3d       position_for_custom_gcode() const;
+    void        set_position_from_custom_gcode(const Vec3d &position);
     double      get_zhop() const { return m_lifted; }
 
     //BBS: set offset for gcode writer
@@ -168,6 +173,20 @@ public:
     // configured is carried over, so install order does not matter.
     void set_kinematics(std::unique_ptr<MachineKinematics> kinematics);
     const MachineKinematics& kinematics() const { return *m_kinematics; }
+    // Generated motion only. The rigid map excludes physical plate/nozzle/Z
+    // calibration, which remains in machine coordinates after the rotation.
+    void set_section_transform(const std::optional<Transform3d> &transform);
+    // Keep physical limits active for generated global transitions between frames.
+    void set_section_motion_limits(bool enabled) {
+        m_section_motion_limits = enabled;
+        if (!enabled && !m_section_transform)
+            m_section_emitted_position.reset();
+    }
+    bool section_motion_limits_enabled() const { return m_section_motion_limits || m_section_transform.has_value(); }
+    double max_deposited_machine_z() const { return m_max_deposited_machine_z; }
+    void seed_deposition_height(double height);
+    bool has_section_transform() const { return m_section_transform.has_value(); }
+    bool supports_arc_moves() const { return !m_section_transform && m_kinematics->supports_arc_moves(); }
 
     // Per-point first-layer test.  When set, travel speed selection asks it per
     // destination point (in the writer's logical placed frame) instead of using
@@ -205,6 +224,10 @@ protected:
     // True when a lift must be skipped because this mapping would emit the
     // stored logical X/Y and that position is not yet known.
     bool must_skip_lift_now() const;
+    // Conservative until direction-aware section feed planning is installed:
+    // any local XYZ motion can contain physical Z motion.
+    double section_motion_speed(double requested) const;
+    unsigned int section_motion_acceleration(unsigned int requested) const;
 
     // True when travel speed is selected per destination point rather than per
     // layer. Set for writers that install a first-layer point test. The
@@ -223,6 +246,18 @@ protected:
     // Never null: a CartesianKinematics at the identity remap reproduces the
     // historical behaviour exactly.
     std::unique_ptr<MachineKinematics> m_kinematics;
+    std::optional<Transform3d> m_section_transform;
+    bool m_section_motion_limits {false};
+    std::vector<Vec2d> m_section_tool_offsets;
+    double m_section_z_offset {0.};
+    double m_section_machine_speed_z {0.};
+    double m_section_machine_acceleration_z {0.};
+    std::optional<Vec3d> m_section_emitted_position;
+    void remember_section_position(bool xy = true, bool z = true);
+    double m_max_deposited_machine_z {0.};
+    void remember_deposition(double extrusion, bool force_no_extrusion, double start_z);
+    Vec3d section_physical_offset() const;
+    Vec3d map_section_point(const Vec3d &point) const;
 
     // Last configured remap / build volume, replayed onto a newly installed
     // kinematics so set_kinematics() and the setters are order-independent.

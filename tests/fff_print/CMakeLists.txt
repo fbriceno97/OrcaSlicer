@@ -19,6 +19,10 @@ add_executable(${_TEST_NAME}_tests
 	test_model.cpp
 	test_multifilament.cpp
 	test_perimeters.cpp
+	test_wave_overhangs_windows.cpp
+	test_hotend_collision.cpp
+	test_section_pipeline.cpp
+	test_section_support.cpp
 	# Seam geometry and pipeline regressions share the existing Print fixtures.
 	test_precise_seam.cpp
 	test_print.cpp

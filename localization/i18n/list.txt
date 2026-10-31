@@ -71,6 +71,8 @@ src/slic3r/GUI/Gizmos/GLGizmoPainterBase.cpp
 src/slic3r/GUI/Gizmos/GizmoObjectManipulation.cpp
 src/slic3r/GUI/Gizmos/GLGizmoCut.cpp
 src/slic3r/GUI/Gizmos/GLGizmoCut.hpp
+src/slic3r/GUI/Gizmos/GLGizmoCutPlanes.cpp
+src/slic3r/GUI/Gizmos/GLGizmoCutPlanes.hpp
 src/slic3r/GUI/Gizmos/GLGizmoSimplify.cpp
 src/slic3r/GUI/Gizmos/GLGizmoSimplify.hpp
 src/slic3r/GUI/Gizmos/GLGizmoUtils.cpp
@@ -212,6 +214,7 @@ src/slic3r/Utils/PresetUpdater.cpp
 src/slic3r/Utils/Http.cpp
 src/slic3r/Utils/Process.cpp
 src/libslic3r/GCode.cpp
+src/libslic3r/GCode/HotendCollisionCheck.cpp
 src/libslic3r/GCodeWriter.cpp
 src/libslic3r/GCode/ToolOrdering.cpp
 src/libslic3r/GCode/SeamPlacer.cpp
@@ -392,3 +395,4 @@ src/slic3r/GUI/PostProcessor.cpp
 src/slic3r/GUI/TaskManager.cpp
 src/slic3r/GUI/Widgets/ProgressDialog.hpp
 src/slic3r/GUI/Widgets/StepCtrl.cpp
+src/libslic3r/Support/SectionSupportDemand.cpp

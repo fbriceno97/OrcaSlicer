@@ -3346,7 +3346,7 @@ static void organic_smooth_branches_avoid_collisions(
     std::function<void()>                                throw_on_cancel)
 {
     TriangleMesh mesh = print_object.model_object()->raw_mesh();
-    mesh.transform(print_object.trafo_centered());
+    mesh.transform(print_object.segment() ? print_object.trafo_sliced() : print_object.trafo_centered());
     double scale = 10.;
     openvdb::FloatGrid::Ptr grid = mesh_to_grid(mesh.its, openvdb::math::Transform{}, scale, 0., 0.);
     std::unique_ptr<openvdb::tools::ClosestSurfacePoint<openvdb::FloatGrid>> closest_surface_point = openvdb::tools::ClosestSurfacePoint<openvdb::FloatGrid>::create(*grid);

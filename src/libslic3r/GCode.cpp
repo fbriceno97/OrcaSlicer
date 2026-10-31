@@ -3,6 +3,7 @@
 #include "Circle.hpp"
 #include "Config.hpp"
 #include "GCode/GCodeProcessor.hpp"
+#include "GCode/SectionFrame.hpp"
 #include "Flow.hpp"
 #include "GCode/ThumbnailData.hpp"
 #include "GCode/ToolOrdering.hpp"
@@ -55,6 +56,7 @@
 #include <Eigen/Geometry>
 #include <Shiny/ShinyMacros.h>
 #include <algorithm>
+#include <unordered_map>
 #include <cctype>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/filesystem/operations.hpp>
@@ -1415,9 +1417,9 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
                 // BBS: check whether custom gcode changes the z position. Update if changed
                 double temp_z_after_tool_change;
                 if (GCodeProcessor::get_last_z_from_gcode(toolchange_gcode_str, temp_z_after_tool_change)) {
-                    Vec3d pos = gcodegen.writer().get_position();
+                    Vec3d pos = gcodegen.writer().position_for_custom_gcode();
                     pos(2)    = temp_z_after_tool_change;
-                    gcodegen.writer().set_position(pos);
+                    gcodegen.update_position_from_custom_gcode(pos);
                 }
             }
             need_travel_after_change_filament_gcode = true;
@@ -2138,9 +2140,21 @@ void GCode::PlaceholderParserIntegration::init(const GCodeWriter &writer)
     this->parser.set("zhop", this->opt_zhop);
 }
 
+void GCode::update_position_from_custom_gcode(const Vec3d &position)
+{
+    m_writer.set_position_from_custom_gcode(position);
+    if (m_writer.section_motion_limits_enabled()) {
+        const Vec3d logical = m_writer.get_position();
+        const Point xy = gcode_to_point(Vec2d(logical.x(), logical.y()));
+        set_last_pos(Point3(xy, scale_(logical.z() - m_config.z_offset.value)));
+        m_wipe.reset_path();
+    }
+}
+
 void GCode::PlaceholderParserIntegration::update_from_gcodewriter(const GCodeWriter &writer)
 {
-    memcpy(this->position.data(), writer.get_position().data(), sizeof(double) * 3);
+    const Vec3d machine_position = writer.position_for_custom_gcode();
+    memcpy(this->position.data(), machine_position.data(), sizeof(double) * 3);
     this->opt_position->values = this->position;
     this->opt_zhop->value = writer.get_zhop();
 
@@ -2365,14 +2379,14 @@ std::vector<GCode::LayerToPrint> GCode::collect_layers_to_print(const PrintObjec
             PrintStateBase::WarningLevel::CRITICAL, warning, PrintStateBase::SlicingEmptyGcodeLayers);
     }
 
-    // Belt printers: drop the layers that print nothing at all.  An object's slicing
+    // Drop empty belt lead-in and section contact-planning layers. An object's slicing
     // frame starts at the belt below its leading end, so its first layers are empty,
     // and with several objects along the belt those empty layers fall between other
     // objects' printing layers.  A layer change with no moves is noise in the file, and
     // the preview (libvgcode) numbers its layers from the moves it sees, so a gap folds
     // every later layer into the one before it.  Both print sequences collect their
     // layers here, so neither writes such a layer.
-    if (object.print()->config().belt_printer.value)
+    if (object.print()->config().belt_printer.value || object.segment())
         layers_to_print.erase(
             std::remove_if(layers_to_print.begin(), layers_to_print.end(), [&object](const LayerToPrint &ltp) {
                 return ! ((ltp.object_layer != nullptr && belt_object_layer_prints_something(object, *ltp.object_layer)) ||
@@ -2930,6 +2944,13 @@ void GCode::do_export(Print* print, const char* path, GCodeProcessorResult* resu
     m_processor.result().nozzle_group_result = m_print->get_layered_nozzle_group_result();
 
     m_processor.finalize(true);
+    try {
+        print->validate_nonplanar_gcode(m_processor.get_result());
+    } catch (...) {
+        // Never leave rejected non-planar output available for sending or printing.
+        boost::nowide::remove(path_tmp.c_str());
+        throw;
+    }
 //    DoExport::update_print_estimated_times_stats(m_processor, print->m_print_statistics);
     DoExport::update_print_estimated_stats(m_processor, m_writer.extruders(), print->m_print_statistics, print->config());
     // Printed-mass safety check. Flushed filament leaves the bed, so subtract it
@@ -3012,6 +3033,7 @@ namespace DoExport {
         processor.initialize_from_context(nozzle_group_result);
         processor.initialize_result_moves();
         processor.apply_config(config);
+        processor.preserve_preparation_z(config.enable_nonplanar.value);
         processor.enable_stealth_time_estimator(silent_time_estimator_enabled);
     }
 
@@ -3189,6 +3211,40 @@ static inline std::vector<const PrintInstance*> sort_object_instances_by_max_z(c
 //BBS: add sort logic for seq-print
 std::vector<const PrintInstance*> sort_object_instances_by_model_order(const Print& print, bool init_order)
 {
+    const bool section_mode = print.config().enable_nonplanar.value &&
+        std::any_of(print.objects().begin(), print.objects().end(), [](const PrintObject *object) {
+            return object->segment().has_value();
+        });
+    if (section_mode) {
+        // A single ModelInstance now owns several PrintInstances. Preserve all
+        // of them and finish its sections before advancing to another copy.
+        std::unordered_map<const ModelInstance *, std::vector<const PrintInstance *>> by_instance;
+        for (const PrintObject *object : print.objects())
+            for (const PrintInstance &instance : object->instances())
+                by_instance[instance.model_instance].push_back(&instance);
+        std::vector<std::vector<const PrintInstance *>> groups;
+        for (const ModelObject *object : print.model().objects)
+            for (ModelInstance *instance : object->instances) {
+                auto found = by_instance.find(instance);
+                if (found == by_instance.end())
+                    continue;
+                auto group = std::move(found->second);
+                std::stable_sort(group.begin(), group.end(), [](const PrintInstance *a, const PrintInstance *b) {
+                    return a->print_object->segment_index() < b->print_object->segment_index();
+                });
+                if (init_order)
+                    instance->arrange_order = static_cast<int>(groups.size() + 1);
+                groups.push_back(std::move(group));
+            }
+        std::stable_sort(groups.begin(), groups.end(), [](const auto &a, const auto &b) {
+            return a.front()->model_instance->arrange_order < b.front()->model_instance->arrange_order;
+        });
+        std::vector<const PrintInstance *> instances;
+        instances.reserve(print.num_object_instances());
+        for (const auto &group : groups)
+            instances.insert(instances.end(), group.begin(), group.end());
+        return instances;
+    }
     auto find_object_index = [](const Model& model, const ModelObject* obj) {
         for (int index = 0; index < model.objects.size(); index++)
         {
@@ -3374,8 +3430,8 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
     // How many times will be change_layer() called?
     // change_layer() in turn increments the progress bar status.
     m_layer_count = 0;
-    // On a belt, collect_layers_to_print() drops the layers that print nothing (an
-    // object's empty lead-in), so they must not be counted here either or the layer
+    // Empty belt lead-in and section contact-planning layers are omitted by
+    // collect_layers_to_print(), so they must not be counted here or the layer
     // count in the file disagrees with its layer changes.
     const bool belt = print.config().belt_printer.value;
     if (print.config().print_sequence == PrintSequence::ByObject) {
@@ -3384,10 +3440,10 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
             std::vector<coordf_t> zs;
             zs.reserve(object->layers().size() + object->support_layers().size());
             for (auto layer : object->layers())
-                if (! belt || belt_object_layer_prints_something(*object, *layer))
+                if ((!belt && !object->segment()) || belt_object_layer_prints_something(*object, *layer))
                     zs.push_back(layer->print_z);
             for (auto layer : object->support_layers())
-                if (! belt || layer->has_extrusions())
+                if ((!belt && !object->segment()) || layer->has_extrusions())
                     zs.push_back(layer->print_z);
             // Belt brim apron bands each get their own change_layer() call.
             for (const BeltBrimBand &band : object->belt_brim_prologue())
@@ -3410,10 +3466,10 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
         for (auto object : print.objects()) {
             zs.reserve(zs.size() + object->layers().size() + object->support_layers().size());
             for (auto layer : object->layers())
-                if (! belt || belt_object_layer_prints_something(*object, *layer))
+                if ((!belt && !object->segment()) || belt_object_layer_prints_something(*object, *layer))
                     zs.push_back(layer->print_z);
             for (auto layer : object->support_layers())
-                if (! belt || layer->has_extrusions())
+                if ((!belt && !object->segment()) || layer->has_extrusions())
                     zs.push_back(layer->print_z);
             // See the ByObject branch: apron bands are real printed layers.
             for (const BeltBrimBand &band : object->belt_brim_prologue())
@@ -3435,6 +3491,12 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
 
     m_enable_cooling_markers = true;
     this->apply_print_config(print.config());
+    const auto print_objects = print.objects();
+    const bool has_sections = std::any_of(print_objects.begin(), print_objects.end(), [](const PrintObject *object) {
+        return object->segment().has_value();
+    });
+    m_writer.set_section_motion_limits(has_sections);
+    ScopeGuard reset_motion_limits([this]() { m_writer.set_section_motion_limits(false); });
     m_config.apply(print.default_object_config());
     m_config.apply(print.default_region_config());
 
@@ -4492,11 +4554,20 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
 
         // Do all objects for each layer.
         if (print.config().print_sequence == PrintSequence::ByObject && !has_wipe_tower) {
+            if (has_sections && m_fan_mover)
+                file.write(m_fan_mover->process_gcode("", true));
+            if (has_sections) {
+                const double deposited_z = max_printed_machine_z(m_processor.get_result(), 0, 0., m_config.z_offset.value);
+                m_max_layer_z = static_cast<float>(deposited_z);
+                m_writer.seed_deposition_height(deposited_z);
+            }
             size_t finished_objects = 0;
             print_object_instance_sequential_active = first_has_extrude_print_object;
             const PrintObject *prev_object = (*print_object_instance_sequential_active)->print_object;
             for (; print_object_instance_sequential_active != print_object_instances_ordering.end(); ++ print_object_instance_sequential_active) {
                 const PrintObject &object = *(*print_object_instance_sequential_active)->print_object;
+                const size_t object_moves_begin = m_processor.get_result().moves.size();
+                const double previous_world_maximum = m_max_layer_z;
                 if (&object != prev_object || tool_ordering.first_extruder() != final_extruder_id) {
                     auto cached_ordering = use_seq_dynamic_cache ? seq_dynamic_orderings.find(&object) : seq_dynamic_orderings.end();
                     if (cached_ordering != seq_dynamic_orderings.end()) {
@@ -4541,7 +4612,15 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
                     } else {
                         file.write(this->retract());
                     }
-                    file.write(m_writer.travel_to_z(m_max_layer_z + m_writer.config.z_hop.get_at(get_filament_config_index((int)initial_extruder_id))));
+                    const double profile_hop = m_writer.config.z_hop.get_at(get_filament_config_index((int)initial_extruder_id));
+                    // Section staging clears all previously deposited material;
+                    // a profile's zero-hop setting must not turn it into a skim.
+                    const double staging_z = m_max_layer_z + (has_sections ? std::max(1., profile_hop) : profile_hop);
+                    if (has_sections && (!std::isfinite(staging_z) || staging_z > print.config().printable_height.value + EPSILON))
+                        throw SlicingError(_u8L("Insufficient vertical clearance for a non-planar section transition."));
+                    file.write(m_writer.travel_to_z(staging_z));
+                    if (has_sections)
+                        m_avoid_crossing_perimeters.disable_once();
                     file.write(this->travel_to(Point(0, 0), erNone, "move to origin position for next object"));
                     m_enable_cooling_markers = true;
                     // Disable motion planner when traveling to first object point.
@@ -4557,8 +4636,24 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
                     file.writeln(printing_by_object_gcode);
                 }
                 // Reset the cooling buffer internal state (the current position, feed rate, accelerations).
+                // Print's export guard remains until section transitions, layer
+                // semantics and support propagation are fully integrated.
+                const bool section_frame = object.segment().has_value();
+                ScopeGuard reset_section([this, section_frame]() {
+                    if (section_frame)
+                        m_writer.set_section_transform(std::nullopt);
+                });
+                file.write(begin_section_frame(**print_object_instance_sequential_active, m_origin, m_writer));
+                if (section_frame) {
+                    // Establish bounded modal acceleration before the first move,
+                    // even when the process requests inherited/default settings.
+                    file.write(m_writer.set_print_acceleration(std::numeric_limits<unsigned int>::max()));
+                    file.write(m_writer.set_travel_acceleration(std::numeric_limits<unsigned int>::max()));
+                    m_last_pos_defined = false;
+                    m_wipe.reset_path();
+                }
                 m_cooling_buffer->set_current_extruder(initial_extruder_id, get_extruder_id(initial_extruder_id));
-                m_cooling_buffer->reset(this->writer().get_position());
+                m_cooling_buffer->reset(section_frame ? m_writer.position_for_custom_gcode() : m_writer.get_position());
                 // The belt first-layer band is tracked per object as well: if the previous
                 // object ended inside the band, this one has to open its own.
                 m_belt_in_band = false;
@@ -4569,6 +4664,16 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
                 m_printed_objects.emplace_back(&object);
                 this->process_layers(print, tool_ordering, collect_layers_to_print(object, print.config().belt_printer.value), *print_object_instance_sequential_active - object.instances().data(), file,
                                      prime_extruder);
+                if (has_sections && m_fan_mover)
+                    file.write(m_fan_mover->process_gcode("", true));
+                if (section_frame) {
+                    file.write(end_section_frame(m_writer));
+                    m_last_pos_defined = false;
+                    m_wipe.reset_path();
+                }
+                if (has_sections)
+                    m_max_layer_z = static_cast<float>(max_printed_machine_z(m_processor.get_result(), object_moves_begin,
+                        previous_world_maximum, m_config.z_offset.value));
                 {
                     // save the flush statitics stored in tool ordering by object
                     print.m_statistics_by_extruder_count.stats_by_single_extruder += tool_ordering.get_filament_change_stats(ToolOrdering::FilamentChangeMode::SingleExt);
@@ -5240,7 +5345,17 @@ std::string GCode::placeholder_parser_process(const std::string &name, const std
 PlaceholderParserIntegration &ppi = m_placeholder_parser_integration;
     try {
         ppi.update_from_gcodewriter(m_writer);
-        std::string output = ppi.parser.process(templ, current_filament_id, config_override, &ppi.output_config, &ppi.context);
+        DynamicConfig physical_override;
+        const DynamicConfig *effective_override = config_override;
+        if (m_writer.section_motion_limits_enabled() && config_override && config_override->has("max_layer_z")) {
+            physical_override = *config_override;
+            // Raw macro Z commands bypass writer calibration. Supply the full
+            // deposited machine height, including calibration, not local layer Z.
+            physical_override.set_key_value("max_layer_z", new ConfigOptionFloat(
+                m_writer.max_deposited_machine_z()));
+            effective_override = &physical_override;
+        }
+        std::string output = ppi.parser.process(templ, current_filament_id, effective_override, &ppi.output_config, &ppi.context);
         ppi.validate_output_vector_variables();
         const CustomGCodeMotionStateChanges motion_state_changes = custom_gcode_motion_state_changes(output);
         if (motion_state_changes.acceleration)
@@ -5250,8 +5365,9 @@ PlaceholderParserIntegration &ppi = m_placeholder_parser_integration;
 
         if (const std::vector<double> &pos = ppi.opt_position->values; ppi.position != pos) {
             // Update G-code writer.
-            m_writer.set_position({ pos[0], pos[1], pos[2] });
-            this->set_last_pos(this->gcode_to_point({ pos[0], pos[1] }));
+            update_position_from_custom_gcode(Vec3d(pos[0], pos[1], pos[2]));
+            if (!m_writer.section_motion_limits_enabled())
+                this->set_last_pos(this->gcode_to_point({ pos[0], pos[1] }));
         }
 
         for (const Extruder &e : m_writer.extruders()) {
@@ -6346,9 +6462,9 @@ std::string GCode::generate_timelapse_gcode(const Print &print, coordf_t print_z
 
         double temp_z_after_tool_change;
         if (GCodeProcessor::get_last_z_from_gcode(timelapse_gcode, temp_z_after_tool_change)) {
-            Vec3d pos = m_writer.get_position();
+            Vec3d pos = m_writer.position_for_custom_gcode();
             pos(2)    = temp_z_after_tool_change;
-            m_writer.set_position(pos);
+            update_position_from_custom_gcode(pos);
         }
     }
 
@@ -7289,9 +7405,9 @@ LayerResult GCode::process_layer(
 
         double temp_z_after_tool_change;
         if (GCodeProcessor::get_last_z_from_gcode(wrapping_gcode, temp_z_after_tool_change)) {
-            Vec3d pos = m_writer.get_position();
+            Vec3d pos = m_writer.position_for_custom_gcode();
             pos(2)    = temp_z_after_tool_change;
-            m_writer.set_position(pos);
+            update_position_from_custom_gcode(pos);
         }
         return wrapping_gcode;
     };
@@ -9027,6 +9143,13 @@ static bool overhang_fan_active(float overlap, int overhang_fan_threshold, Extru
 std::string GCode::_extrude(const ExtrusionPath &path, const std::string &path_description, double speed)
 {
     std::string gcode;
+    // Keep wave paths identifiable in exported files without changing the existing
+    // overhang role consumed by preview, cooling, and pressure advance.
+    if (path.wave_overhang)
+        gcode += "; WAVE_OVERHANG_BEGIN\n";
+    const bool wave_fan_override = path.wave_overhang && m_enable_cooling_markers && m_config.wave_overhang_fan_speed.value >= 0;
+    if (wave_fan_override)
+        gcode += ";_WAVE_FAN_START:" + std::to_string(m_config.wave_overhang_fan_speed.value) + "\n";
 
     const std::string  bridge_description = is_bridge(path.role()) ? path_description + " (bridge)" : std::string();
     const std::string &description        = bridge_description.empty() ? path_description : bridge_description;
@@ -9382,6 +9505,11 @@ std::string GCode::_extrude(const ExtrusionPath &path, const std::string &path_d
     }
 }
     
+    // Wavefronts need an explicit cap even when bridge/overhang speed control is
+    // disabled. Only reduce the already limited speed; never undo a filament cap.
+    if (path.wave_overhang)
+        speed = std::min(speed, m_config.wave_overhang_speed.value);
+
     bool requires_segmented_extrusion = false;
     // A uniform fan state can be represented by the normal path-wide marker. Only a
     // transition within the path requires point-by-point emission.
@@ -9474,6 +9602,12 @@ std::string GCode::_extrude(const ExtrusionPath &path, const std::string &path_d
                     }) != new_points.end();
             }
     }
+
+    // Dynamic overhang estimation may assign individual speeds from the wall
+    // reference speed, independently of the path-wide speed above.
+    if (path.wave_overhang)
+        for (ProcessedPoint &point : new_points)
+            point.speed = std::min(point.speed, float(speed));
 
     double F = speed * 60;  // convert mm/sec to mm/min
     
@@ -10024,6 +10158,10 @@ std::string GCode::_extrude(const ExtrusionPath &path, const std::string &path_d
     }
 
     this->set_last_pos(path.last_point());
+    if (wave_fan_override)
+        gcode += ";_WAVE_FAN_END\n";
+    if (path.wave_overhang)
+        gcode += "; WAVE_OVERHANG_END\n";
     return gcode;
 }
 
@@ -10953,9 +11091,9 @@ std::string GCode::set_extruder(unsigned int new_filament_id, double print_z, bo
             //BBS: check whether custom gcode changes the z position. Update if changed
             double temp_z_after_tool_change;
             if (GCodeProcessor::get_last_z_from_gcode(toolchange_gcode_parsed, temp_z_after_tool_change)) {
-                Vec3d pos = m_writer.get_position();
+                Vec3d pos = m_writer.position_for_custom_gcode();
                 pos(2) = temp_z_after_tool_change;
-                m_writer.set_position(pos);
+                update_position_from_custom_gcode(pos);
             }
         }
     }

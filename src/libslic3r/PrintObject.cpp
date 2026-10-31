@@ -1,3 +1,6 @@
+#include "CutPlaneSegmentation.hpp"
+#include "Support/SectionSupportDemand.hpp"
+#include "Support/SegmentSupportBounds.hpp"
 #include "ExPolygon.hpp"
 #include "Config.hpp"
 #include "Exception.hpp"
@@ -980,6 +983,15 @@ void PrintObject::generate_support_material(bool with_belt_brim)
             m_print->set_status(50, L("Generating support"));
 
             this->_generate_support_material();
+            const SegmentSupportBounds section_bounds(*this);
+            if (section_bounds.is_active())
+                for (SupportLayer *layer : m_support_layers) {
+                    m_print->throw_if_canceled();
+                    section_bounds.clip_extrusions(layer->support_fills, layer->print_z, layer->height);
+                    Polygons covered;
+                    layer->support_fills.polygons_covered_by_width(covered, 0.f);
+                    layer->support_islands = union_ex(covered);
+                }
             m_print->throw_if_canceled();
         }
         // Orca: the tree support collision/avoidance caches and support nodes are only used while this step runs
@@ -1443,6 +1455,12 @@ bool PrintObject::invalidate_state_by_config_options(
     std::vector<PrintObjectStep> steps;
     bool invalidated = false;
     for (const t_config_option_key &opt_key : opt_keys) {
+        // Section contact headroom is part of the object layer schedule.
+        if (m_segment && (opt_key == "enable_support" || opt_key == "enforce_support_layers" || opt_key == "support_top_z_distance") &&
+            std::any_of(m_segment->clips.begin(), m_segment->clips.end(), [](const CutSegmentClip &clip) {
+                return clip.role == CutClipRole::Ceiling;
+            }))
+            steps.emplace_back(posSlice);
         if (   opt_key == "brim_width"
             || opt_key == "leading_brim_length"
             || opt_key == "extra_brim_width"
@@ -1481,6 +1499,8 @@ bool PrintObject::invalidate_state_by_config_options(
             || opt_key == "min_width_top_surface"
             || opt_key == "only_one_wall_first_layer"
             || opt_key == "extra_perimeters_on_overhangs"
+            || opt_key == "wave_overhangs"
+            || opt_key == "wave_overhang_line_spacing"
             || opt_key == "detect_overhang_wall"
             || opt_key == "initial_layer_line_width"
             || opt_key == "inner_wall_line_width"
@@ -1797,6 +1817,8 @@ bool PrintObject::invalidate_state_by_config_options(
             || opt_key == "overhang_3_4_speed"
             || opt_key == "overhang_4_4_speed"
             || opt_key == "bridge_speed"
+            || opt_key == "wave_overhang_speed"
+            || opt_key == "wave_overhang_fan_speed"
             || opt_key == "internal_bridge_speed"
             || opt_key == "outer_wall_speed"
             || opt_key == "small_perimeter_speed"
@@ -1865,6 +1887,8 @@ bool PrintObject::invalidate_step(PrintObjectStep step)
         invalidated |= this->invalidate_steps({ posIroning, posContouring, posSimplifyInfill });
         invalidated |= m_print->invalidate_steps({ psSkirtBrim });
     } else if (step == posSlice) {
+        m_segment_support_demand.clear();
+        m_segment_body_demand.clear();
         // posSimplifySupportPath is listed with posSupportMaterial: invalidate_steps() does not
         // propagate, so without it a re-slice regenerated the supports but kept the step done,
         // and the new support paths were exported unsimplified, unlike a fresh slice.
@@ -4261,8 +4285,12 @@ void PrintObject::update_slicing_parameters()
               object_height = hr.object_height;
               belt_floor    = hr.floor_params;
           }
+          // Section extents were measured after the instance transform, including
+          // shrinkage compensation. Their own layer schedule starts at the rebase.
+          if (m_segment)
+              object_height = section_support_layer_top(*this) - m_segment->slice_z_base();
           m_slicing_params = SlicingParameters::create_from_config(pcfg, m_config, object_height,
-                                                                   this->object_extruders(), this->print()->shrinkage_compensation());
+              this->object_extruders(), m_segment ? Vec3d(Vec3d::Ones()) : this->print()->shrinkage_compensation());
           // Populate belt floor parameters into slicing params for support clipping.
           m_slicing_params.belt_floor_shear_factor = belt_floor.shear_factor;
           m_slicing_params.belt_floor_from_axis    = belt_floor.from_axis;

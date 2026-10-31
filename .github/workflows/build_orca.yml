@@ -17,6 +17,10 @@ on:
           required: false
           type: string
           default: msvc
+        feature-tests-only:
+          required: false
+          type: boolean
+          default: false
         macos-combine-only:
           required: false
           type: boolean
@@ -43,8 +47,20 @@ jobs:
           lfs: 'false'
 
       - name: load cached deps
+        id: deps_restore
         if: ${{ !(runner.os == 'macOS' && inputs.macos-combine-only) }}
-        uses: actions/cache@v6
+        continue-on-error: ${{ runner.os == 'Windows' && github.repository == 'fbriceno97/OrcaSlicer' && (github.head_ref == 'feature/unlayered-wave-nonplanar' || github.ref_name == 'feature/unlayered-wave-nonplanar') }}
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ github.workspace }}/${{ inputs.cache-path }}
+          key: ${{ inputs.cache-key }}
+          fail-on-cache-miss: true
+
+      # A transient storage egress throttle is not a missing dependency cache.
+      # Retry once; a second failure still stops the build before compilation.
+      - name: Retry Windows dependency cache restore
+        if: ${{ steps.deps_restore.outcome == 'failure' && runner.os == 'Windows' && github.repository == 'fbriceno97/OrcaSlicer' && (github.head_ref == 'feature/unlayered-wave-nonplanar' || github.ref_name == 'feature/unlayered-wave-nonplanar') }}
+        uses: actions/cache/restore@v6
         with:
           path: ${{ github.workspace }}/${{ inputs.cache-path }}
           key: ${{ inputs.cache-key }}
@@ -74,6 +90,9 @@ jobs:
             cl=$("$vswhere" -latest -products '*' -find 'VC\Tools\MSVC\'"$toolset"'\**\cl.exe' | tr -d '\r' | head -1)
             leg="$leg-vc$("$cl" 2>&1 | grep -o -E 'Version [0-9.]+' | cut -d' ' -f2)"
           fi
+          echo "CCACHE_BASE_LEG=$leg" >> "$GITHUB_ENV"
+          # Separate writers avoid a test-only cache replacing the GUI cache.
+          if [ "${{ inputs.feature-tests-only }}" = true ]; then leg="feature-$leg"; fi
           echo "CCACHE_LEG=$leg" >> "$GITHUB_ENV"
           echo "CCACHE_ENTRY=ccache-$leg-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_ENV"
 
@@ -101,7 +120,9 @@ jobs:
         with:
           path: ${{ github.workspace }}/.ccache
           key: ${{ env.CCACHE_ENTRY }}
-          restore-keys: ccache-${{ env.CCACHE_LEG }}-
+          restore-keys: |
+            ccache-${{ env.CCACHE_LEG }}-
+            ccache-${{ env.CCACHE_BASE_LEG }}-
 
       - name: Enable compiler cache
         if: ${{ steps.ccache.outcome == 'success' }}
@@ -469,8 +490,56 @@ jobs:
           path: ${{ runner.temp }}/nsis
           key: nsis-${{ env.NSIS_VERSION }}
 
+      - name: Compile and run experimental slicing regressions Win
+        if: runner.os == 'Windows' && github.repository == 'fbriceno97/OrcaSlicer' && (github.head_ref == 'feature/unlayered-wave-nonplanar' || github.ref_name == 'feature/unlayered-wave-nonplanar')
+        shell: pwsh
+        run: |
+          $deps = (Split-Path "${{ github.workspace }}/${{ inputs.cache-path }}").Replace('\', '/')
+          $flags = if ("${{ inputs.compiler }}" -eq "clang") { "-l", "-x" } else { "--msvc", "--msbuild" }
+          $buildLog = Join-Path $env:RUNNER_TEMP 'orca-slicing-tests-build.log'
+          & .\build_win.bat -s --tests --slicer-target fff_print_tests --arch ${{ inputs.arch }} --build-dir $env:BUILD_DIR --deps-dir $deps @flags 2>&1 | Tee-Object -FilePath $buildLog
+          $buildExit = $LASTEXITCODE
+          if ($buildExit -eq 0) {
+            cmake --build $env:BUILD_DIR --config Release --target libslic3r_tests 2>&1 | Tee-Object -FilePath $buildLog -Append
+            $buildExit = $LASTEXITCODE
+          }
+          if ($buildExit -ne 0) {
+            python scripts/report_build_failure.py $buildLog
+            exit $buildExit
+          }
+          $testExit = 0
+          $env:ORCA_TEST_GCODE_ARTIFACT_DIR = Join-Path $env:RUNNER_TEMP 'orca-feature-gcode'
+          foreach ($suite in @('fff_print', 'libslic3r')) {
+            $report = Join-Path $env:RUNNER_TEMP "orca-$suite-features.xml"
+            $testLog = Join-Path $env:RUNNER_TEMP "orca-$suite-features.log"
+            ctest --test-dir "$env:BUILD_DIR/tests/$suite" -C Release -L '^(CutPlaneSegmentation|cutplanes|HotendCollision|HotendEnvelope|WaveOverhangs|Nonplanar|PreciseSeam3mf|ConfigRegistration)$' --schedule-random --no-tests=error --timeout 180 --output-on-failure --output-junit $report 2>&1 | Tee-Object -FilePath $testLog
+            $suiteExit = $LASTEXITCODE
+            Write-Host "$suite feature test exit code: $suiteExit"
+            python scripts/report_ctest_failures.py $report
+            if ($suiteExit -ne 0) { $testExit = $suiteExit }
+          }
+          if (Test-Path $env:ORCA_TEST_GCODE_ARTIFACT_DIR) {
+            Get-ChildItem $env:ORCA_TEST_GCODE_ARTIFACT_DIR -Filter '*.gcode' -File | ForEach-Object {
+              $digest = (Get-FileHash $_.FullName -Algorithm SHA256).Hash
+              Write-Host "G-code fixture: $($_.Name), bytes=$($_.Length), sha256=$digest"
+            }
+          }
+          exit $testExit
+
+      - name: Preserve experimental regression reports
+        if: always() && runner.os == 'Windows' && github.repository == 'fbriceno97/OrcaSlicer' && (github.head_ref == 'feature/unlayered-wave-nonplanar' || github.ref_name == 'feature/unlayered-wave-nonplanar')
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-feature-regression-reports${{ inputs.feature-tests-only && '-fast' || '' }}
+          path: |
+            ${{ runner.temp }}/orca-*-features.xml
+            ${{ runner.temp }}/orca-*-features.log
+            ${{ runner.temp }}/orca-feature-gcode/
+          if-no-files-found: ignore
+          retention-days: 5
+
       - name: Build slicer Win
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && !inputs.feature-tests-only
         working-directory: ${{ github.workspace }}
         # --tests builds the unit tests too; the unit_tests_windows_* jobs run them.
         run: |
@@ -478,24 +547,30 @@ jobs:
           $deps = (Split-Path "${{ github.workspace }}/${{ inputs.cache-path }}").Replace('\', '/')
           # -l compiles with Visual Studio's clang-cl and -x builds with Ninja; --msvc --msbuild is cl under the Visual Studio generator.
           $flags = if ("${{ inputs.compiler }}" -eq "clang") { "-l", "-x" } else { "--msvc", "--msbuild" }
-          .\build_win.bat -s --tests -i --arch ${{ inputs.arch }} --build-dir $env:BUILD_DIR --deps-dir $deps @flags
+          $buildLog = Join-Path $env:RUNNER_TEMP 'orca-windows-build.log'
+          & .\build_win.bat -s --tests -i --arch ${{ inputs.arch }} --build-dir $env:BUILD_DIR --deps-dir $deps @flags 2>&1 | Tee-Object -FilePath $buildLog
+          $buildExit = $LASTEXITCODE
+          if ($buildExit -ne 0) {
+            python scripts/report_build_failure.py $buildLog
+            exit $buildExit
+          }
         shell: pwsh
 
       - name: Build system preset cache (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && !inputs.feature-tests-only
         shell: cmd
         # Shipped into both the already-installed tree (portable zip, MSIX) and
         # the checkout cpack re-installs from when it builds the NSIS installer.
         run: scripts\build_preset_cache.bat --prune-source "%BUILD_DIR%" "resources\profiles" "%BUILD_DIR%\OrcaSlicer\resources\profiles"
 
       - name: Pack unit tests Win
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && !inputs.feature-tests-only
         working-directory: ${{ github.workspace }}
         shell: pwsh
         run: tar -cvf build_tests.tar ${{ env.BUILD_DIR }}/tests
 
       - name: Upload Test Artifact Win
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && !inputs.feature-tests-only
         uses: actions/upload-artifact@v7
         with:
           name: ${{ github.sha }}-tests-windows-${{ inputs.arch }}
@@ -507,13 +582,13 @@ jobs:
       # NSIS is x86-only; it runs (and the installer it emits runs) under ARM64's
       # x86 emulation, packaging the native arm64 payload from build-arm64.
       - name: Create installer Win
-        if: runner.os == 'Windows' && !vars.SELF_HOSTED
+        if: runner.os == 'Windows' && !vars.SELF_HOSTED && !inputs.feature-tests-only
         working-directory: ${{ github.workspace }}/${{ env.BUILD_DIR }}
         run: |
           cpack -G NSIS
 
       - name: Verify custom Windows identity
-        if: runner.os == 'Windows' && !vars.SELF_HOSTED
+        if: runner.os == 'Windows' && !vars.SELF_HOSTED && !inputs.feature-tests-only
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -557,7 +632,7 @@ jobs:
           Write-Host 'PASS: installed launcher metadata and all six Open with associations'
 
       - name: Preserve identity diagnostics on failure
-        if: failure() && runner.os == 'Windows'
+        if: failure() && runner.os == 'Windows' && !inputs.feature-tests-only
         uses: actions/upload-artifact@v7
         with:
           name: windows-identity-diagnostics
@@ -569,47 +644,49 @@ jobs:
           retention-days: 5
 
       - name: Pack app
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && !inputs.feature-tests-only
         working-directory: ${{ github.workspace }}/${{ env.BUILD_DIR }}
         shell: cmd
         run: '"C:/Program Files/7-Zip/7z.exe" a -tzip OrcaSlicer_Windows_${{ env.ver }}${{ env.ARCH_SUFFIX }}_portable.zip ${{ github.workspace }}/${{ env.BUILD_DIR }}/OrcaSlicer'
 
       - name: Pack PDB
-        if: runner.os == 'Windows' && inputs.arch != 'arm64' && !vars.SELF_HOSTED
+        if: runner.os == 'Windows' && inputs.arch != 'arm64' && !vars.SELF_HOSTED && !inputs.feature-tests-only
         working-directory: ${{ github.workspace }}/${{ env.BUILD_DIR }}/src/Release
         shell: cmd
         run: '"C:/Program Files/7-Zip/7z.exe" a -m0=lzma2 -mx9 Debug_PDB_${{ env.ver }}_for_developers_only.7z  *.pdb'
 
       - name: Upload artifacts Win zip
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && !inputs.feature-tests-only
         uses: actions/upload-artifact@v7
         with:
           name: OrcaSlicer_Windows_${{ env.ver }}${{ env.ARCH_SUFFIX }}_portable
           path: ${{ github.workspace }}/${{ env.BUILD_DIR }}/OrcaSlicer
 
       - name: Upload artifacts Win installer
-        if: runner.os == 'Windows' && !vars.SELF_HOSTED
+        # Build/install locally for branding checks, but do not publish an
+        # experimental installer before integration and software checks pass.
+        if: runner.os == 'Windows' && !vars.SELF_HOSTED && !(github.repository == 'fbriceno97/OrcaSlicer' && (github.head_ref == 'feature/unlayered-wave-nonplanar' || github.ref_name == 'feature/unlayered-wave-nonplanar')) && !inputs.feature-tests-only
         uses: actions/upload-artifact@v7
         with:
           name: OrcaSlicer_Windows_${{ env.ver }}${{ env.ARCH_SUFFIX }}
           path: ${{ github.workspace }}/${{ env.BUILD_DIR }}/OrcaSlicer*.exe
 
       - name: Upload artifacts Win PDB
-        if: runner.os == 'Windows' && inputs.arch != 'arm64' && !vars.SELF_HOSTED
+        if: runner.os == 'Windows' && inputs.arch != 'arm64' && !vars.SELF_HOSTED && !inputs.feature-tests-only
         uses: actions/upload-artifact@v7
         with:
           name: PDB
           path: ${{ github.workspace }}/build/src/Release/Debug_PDB_${{ env.ver }}_for_developers_only.7z
 
       - name: Upload OrcaSlicer_profile_validator Win
-        if: runner.os == 'Windows' && inputs.arch != 'arm64' && !vars.SELF_HOSTED
+        if: runner.os == 'Windows' && inputs.arch != 'arm64' && !vars.SELF_HOSTED && !inputs.feature-tests-only
         uses: actions/upload-artifact@v7
         with:
           name: OrcaSlicer_profile_validator_Windows_${{ env.ver }}
           path: ${{ github.workspace }}/build/src/Release/OrcaSlicer_profile_validator.exe
 
       - name: Deploy Windows release portable
-        if: github.repository == 'OrcaSlicer/OrcaSlicer' && github.ref == 'refs/heads/main' && runner.os == 'Windows' && !vars.SELF_HOSTED
+        if: github.repository == 'OrcaSlicer/OrcaSlicer' && github.ref == 'refs/heads/main' && runner.os == 'Windows' && !vars.SELF_HOSTED && !inputs.feature-tests-only
         uses: ./.github/actions/deploy-nightly
         with:
           asset_path: ${{ github.workspace }}/${{ env.BUILD_DIR }}/OrcaSlicer_Windows_${{ env.ver }}${{ env.ARCH_SUFFIX }}_portable.zip
@@ -617,7 +694,7 @@ jobs:
           content_type: application/x-zip-compressed
 
       - name: Deploy Windows release installer
-        if: github.repository == 'OrcaSlicer/OrcaSlicer' && github.ref == 'refs/heads/main' && runner.os == 'Windows' && !vars.SELF_HOSTED
+        if: github.repository == 'OrcaSlicer/OrcaSlicer' && github.ref == 'refs/heads/main' && runner.os == 'Windows' && !vars.SELF_HOSTED && !inputs.feature-tests-only
         uses: ./.github/actions/deploy-nightly
         with:
           asset_path: ${{ github.workspace }}/${{ env.BUILD_DIR }}/OrcaSlicer_Windows_Installer_${{ env.ver }}${{ env.ARCH_SUFFIX }}.exe
@@ -625,7 +702,7 @@ jobs:
           content_type: application/x-msdownload
 
       - name: Deploy Windows OrcaSlicer_profile_validator release
-        if: github.repository == 'OrcaSlicer/OrcaSlicer' && github.ref == 'refs/heads/main' && runner.os == 'Windows' && inputs.arch != 'arm64' && !vars.SELF_HOSTED
+        if: github.repository == 'OrcaSlicer/OrcaSlicer' && github.ref == 'refs/heads/main' && runner.os == 'Windows' && inputs.arch != 'arm64' && !vars.SELF_HOSTED && !inputs.feature-tests-only
         uses: ./.github/actions/deploy-nightly
         with:
           asset_path: ${{ github.workspace }}/build/src/Release/OrcaSlicer_profile_validator.exe
@@ -633,7 +710,7 @@ jobs:
           content_type: application/x-msdownload
 
       - name: Build MSIX Store package Win
-        if: runner.os == 'Windows' && !vars.SELF_HOSTED
+        if: runner.os == 'Windows' && !vars.SELF_HOSTED && !inputs.feature-tests-only
         working-directory: ${{ github.workspace }}
         shell: pwsh
         run: |
@@ -646,7 +723,7 @@ jobs:
             -PublisherDisplayName "${{ vars.ORCA_MSIX_PUBLISHER_DISPLAY_NAME || 'OrcaSlicer' }}"
 
       - name: Upload artifacts Win MSIX
-        if: runner.os == 'Windows' && !vars.SELF_HOSTED
+        if: runner.os == 'Windows' && !vars.SELF_HOSTED && !(github.repository == 'fbriceno97/OrcaSlicer' && (github.head_ref == 'feature/unlayered-wave-nonplanar' || github.ref_name == 'feature/unlayered-wave-nonplanar')) && !inputs.feature-tests-only
         uses: actions/upload-artifact@v7
         with:
           name: OrcaSlicer_Windows_MSIX_${{ env.ver }}${{ env.ARCH_SUFFIX }}
@@ -806,7 +883,10 @@ jobs:
       # finish does not, since the directory may be a truncated copy.
       - name: Save compiler cache
         id: ccache_save
-        if: ${{ always() && steps.ccache_restore.outcome == 'success' && github.event_name != 'pull_request' }}
+        # Trusted same-repository experimental PRs also need their compiled
+        # objects retained between failure/fix cycles. External fork PRs keep
+        # the existing read-only cache policy.
+        if: ${{ always() && steps.ccache_restore.outcome == 'success' && (github.event_name != 'pull_request' || (github.repository == 'fbriceno97/OrcaSlicer' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'feature/unlayered-wave-nonplanar')) }}
         uses: actions/cache/save@v6
         with:
           path: ${{ github.workspace }}/.ccache

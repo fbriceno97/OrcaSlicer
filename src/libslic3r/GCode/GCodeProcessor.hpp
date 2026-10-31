@@ -162,6 +162,7 @@ inline constexpr float DEFAULT_FILAMENT_DENSITY = 1.245f;
         const void *_obj1; // nullptr means wipe tower
         const void *_obj2;
         int                layer = -1;
+        std::string        message;
         ConflictResult(const std::string &objName1, const std::string &objName2, double height, const void *obj1, const void *obj2)
             : _objName1(objName1), _objName2(objName2), _height(height), _obj1(obj1), _obj2(obj2)
         {}
@@ -262,6 +263,8 @@ inline constexpr float DEFAULT_FILAMENT_DENSITY = 1.245f;
             //BBS
             int  object_label_id{-1};
             float print_z{0.0f};
+            uint16_t tool_axis_id{0};
+            int cut_segment_id{-1};
 
             float volumetric_rate() const { return feedrate * mm3_per_mm; }
             float actual_volumetric_rate() const { return actual_feedrate * mm3_per_mm; }
@@ -309,6 +312,9 @@ inline constexpr float DEFAULT_FILAMENT_DENSITY = 1.245f;
         std::string filename;
         unsigned int id;
         std::vector<MoveVertex> moves;
+        // Build directions identify sections; a virtual three-axis nozzle stays upright.
+        std::vector<Vec3f> tool_axes{Vec3f::UnitZ()};
+        bool nonplanar_metadata_valid{true};
         ObjectMass plate_mass;
         // One per object instance, and one per connected body of the instances of several, when the sliced objects were at hand.
         std::vector<ObjectMass> object_masses;
@@ -332,7 +338,7 @@ inline constexpr float DEFAULT_FILAMENT_DENSITY = 1.245f;
         int timelapse_warning_code {0};
         bool support_traditional_timelapse{true};
         float printable_height;
-        float z_offset;
+        float z_offset{ 0.f };
         // Belt printer: physical tilt magnitude (deg) parsed from the slicing-rotation
         // header comment; used to enable the preview's belt view.
         float belt_tilt_angle{ 0.f };
@@ -402,6 +408,8 @@ inline constexpr float DEFAULT_FILAMENT_DENSITY = 1.245f;
             filename = std::forward<Other>(other).filename;
             id = std::forward<Other>(other).id;
             moves = std::forward<Other>(other).moves;
+            tool_axes = std::forward<Other>(other).tool_axes;
+            nonplanar_metadata_valid = other.nonplanar_metadata_valid;
             plate_mass = std::forward<Other>(other).plate_mass;
             object_masses = std::forward<Other>(other).object_masses;
             body_masses = std::forward<Other>(other).body_masses;
@@ -415,6 +423,7 @@ inline constexpr float DEFAULT_FILAMENT_DENSITY = 1.245f;
             long_retraction_when_cut = std::forward<Other>(other).long_retraction_when_cut;
             timelapse_warning_code = std::forward<Other>(other).timelapse_warning_code;
             printable_height = std::forward<Other>(other).printable_height;
+            z_offset = std::forward<Other>(other).z_offset;
             settings_ids = std::forward<Other>(other).settings_ids;
             filaments_count = std::forward<Other>(other).filaments_count;
             extruder_colors = std::forward<Other>(other).extruder_colors;
@@ -607,6 +616,8 @@ inline constexpr float DEFAULT_FILAMENT_DENSITY = 1.245f;
             Total_Cost_Placeholder,
             Total_Wipe_Tower_Cost_Placeholder,
             Total_Wipe_Tower_Filament_Placeholder,
+            Tool_Axis,
+            Segment_Id,
         };
 
         static const std::string& reserved_tag(ETags tag) { return s_IsBBLPrinter ? Reserved_Tags[static_cast<unsigned char>(tag)] : Reserved_Tags_compatible[static_cast<unsigned char>(tag)]; }
@@ -1187,6 +1198,8 @@ inline constexpr float DEFAULT_FILAMENT_DENSITY = 1.245f;
         bool m_skippable{false};
         SkipType m_skippable_type{SkipType::stNone};
         int m_object_label_id{-1};
+        uint16_t m_tool_axis_id{0};
+        int m_cut_segment_id{-1};
         MassLocator m_mass_locator;
         float m_print_z{0.0f};
         std::vector<float> m_remaining_volume;
@@ -1279,6 +1292,7 @@ inline constexpr float DEFAULT_FILAMENT_DENSITY = 1.245f;
         float m_first_layer_height; // mm
         float m_zero_layer_height; // mm
         bool m_processing_start_custom_gcode;
+        bool m_preserve_preparation_z = false;
         bool m_in_config_block;
         unsigned int m_g1_line_id;
         unsigned int m_layer_id;
@@ -1363,6 +1377,9 @@ inline constexpr float DEFAULT_FILAMENT_DENSITY = 1.245f;
             return m_time_processor.machines[static_cast<size_t>(PrintEstimatedStatistics::ETimeMode::Stealth)].enabled;
         }
         void enable_machine_envelope_processing(bool enabled) { m_time_processor.machine_envelope_processing_enabled = enabled; }
+        // Collision validation needs the physical preparation path, including
+        // unannotated custom motion whose display Z is normally flattened.
+        void preserve_preparation_z(bool preserve) { m_preserve_preparation_z = preserve; }
         void reset();
 
         const GCodeProcessorResult& get_result() const { return m_result; }

@@ -2934,6 +2934,10 @@ void TabPrint::build()
         optgroup->append_single_option_line("make_overhang_printable_angle", "quality_settings_overhangs#maximum-angle");
         optgroup->append_single_option_line("make_overhang_printable_hole_size", "quality_settings_overhangs#hole-area");
         optgroup->append_single_option_line("extra_perimeters_on_overhangs", "quality_settings_overhangs#extra-perimeters-on-overhangs");
+        optgroup->append_single_option_line("wave_overhangs");
+        optgroup->append_single_option_line("wave_overhang_line_spacing");
+        optgroup->append_single_option_line("wave_overhang_speed");
+        optgroup->append_single_option_line("wave_overhang_fan_speed");
         optgroup->append_single_option_line("overhang_reverse", "quality_settings_overhangs#reverse-on-even");
         optgroup->append_single_option_line("overhang_reverse_internal_only", "quality_settings_overhangs#reverse-internal-only");
         optgroup->append_single_option_line("overhang_reverse_threshold", "quality_settings_overhangs#reverse-threshold");
@@ -5384,6 +5388,14 @@ void TabPrinter::build_fff()
         optgroup->append_single_option_line("extruder_clearance_height_to_rod", "printer_basic_information_extruder_clearance#height-to-rod");
         optgroup->append_single_option_line("extruder_clearance_height_to_lid", "printer_basic_information_extruder_clearance#height-to-lid");
 
+        optgroup = page->new_optgroup(L("Non-planar printing"));
+        optgroup->append_single_option_line("enable_nonplanar");
+        optgroup->append_single_option_line("nonplanar_hotend_cone_height");
+        optgroup->append_single_option_line("nonplanar_hotend_angle_xpos");
+        optgroup->append_single_option_line("nonplanar_hotend_angle_xneg");
+        optgroup->append_single_option_line("nonplanar_hotend_angle_ypos");
+        optgroup->append_single_option_line("nonplanar_hotend_angle_yneg");
+
         optgroup = page->new_optgroup(L("Adaptive bed mesh"), "param_adaptive_mesh");
         optgroup->append_single_option_line("bed_mesh_min", "printer_basic_information_adaptive_bed_mesh#bed-mesh");
         optgroup->append_single_option_line("bed_mesh_max", "printer_basic_information_adaptive_bed_mesh#bed-mesh");
@@ -6882,6 +6894,12 @@ void TabPrinter::update()
 
 void TabPrinter::update_fff()
 {
+    const auto *nonplanar = m_config->option<ConfigOptionBool>("enable_nonplanar");
+    const char *const envelope_options[] = {"nonplanar_hotend_cone_height", "nonplanar_hotend_angle_xpos",
+        "nonplanar_hotend_angle_xneg", "nonplanar_hotend_angle_ypos", "nonplanar_hotend_angle_yneg"};
+    for (const char *key : envelope_options)
+        toggle_option(key, nonplanar != nullptr && nonplanar->value);
+
     if (m_use_silent_mode != m_config->opt_bool("silent_mode"))	{
         m_rebuild_kinematics_page = true;
         m_use_silent_mode = m_config->opt_bool("silent_mode");

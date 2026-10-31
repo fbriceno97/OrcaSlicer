@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <initializer_list>
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/BoundingBox.hpp"
 #include "libslic3r/Point.hpp"
@@ -31,6 +32,7 @@
 #include "libslic3r/GCode.hpp"
 #include "libslic3r/Model.hpp"
 #include "libslic3r/Print.hpp"
+#include "libslic3r/CutPlanes.hpp"
 #include "libslic3r/ModelArrange.hpp"
 
 #include <boost/algorithm/string/predicate.hpp>
@@ -39,6 +41,7 @@
 #include "test_helpers.hpp"
 #include <cmath>
 #include "libslic3r/GCode/GCodeProcessor.hpp"
+#include "libslic3r/GCode/SectionFrame.hpp"
 #include <algorithm>
 #include <limits>
 #include "libslic3r/GCode/BeltKinematics.hpp"
@@ -46,9 +49,536 @@
 #include "libslic3r/GCodeReader.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Arrange.hpp"
+#include <Eigen/Geometry>
+#include <optional>
+#include <stdexcept>
+#include <cstddef>
 
 using namespace Slic3r;
 using namespace Slic3r::Test;
+
+TEST_CASE("Section staging height tracks calibrated deposition and ignores nonprinting travel", "[GCodeWriter][Nonplanar]")
+{
+    GCodeProcessorResult result;
+    result.moves.resize(4);
+    result.moves[0].type = EMoveType::Extrude;
+    result.moves[0].position = Vec3f(0.f, 0.f, 15.f);
+    result.moves[0].delta_extruder = 1.f;
+    result.moves[1].type = EMoveType::Wipe;
+    result.moves[1].position = Vec3f(0.f, 0.f, 20.f);
+    result.moves[1].delta_extruder = 0.5f;
+    result.moves[2].type = EMoveType::Travel;
+    result.moves[2].position = Vec3f(0.f, 0.f, 250.f);
+    result.moves[3].type = EMoveType::Wipe;
+    result.moves[3].position = Vec3f(0.f, 0.f, 100.f);
+    result.moves[3].delta_extruder = -0.5f;
+    CHECK_THAT(max_printed_machine_z(result, 0, 0., 0.2), Catch::Matchers::WithinAbs(20.2, 1e-6));
+    CHECK_THAT(max_printed_machine_z(result, 2, 10., 0.2), Catch::Matchers::WithinAbs(10., 1e-6));
+    CHECK_THROWS_AS(max_printed_machine_z(result, 5, 0., 0.), std::out_of_range);
+    result.moves[1].position.z() = std::numeric_limits<float>::quiet_NaN();
+    CHECK_THROWS_AS(max_printed_machine_z(result, 0, 0., 0.), std::invalid_argument);
+}
+
+TEST_CASE("Section XYZ motion restores each scaled and mirrored copy without rotating calibration", "[GCodeWriter][Nonplanar]")
+{
+    const bool mirrored = GENERATE(false, true);
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"filament_shrink", "98"},
+        {"filament_shrinkage_compensation_z", "97"}});
+    Print print;
+    Model model;
+    init_print({cube(20.)}, print, model, config);
+    ModelObject *object = model.objects.front();
+    object->instances.front()->set_offset(Vec3d(120., 230., 0.));
+    object->instances.front()->set_rotation(Z, 0.4);
+    object->instances.front()->set_scaling_factor(Vec3d(1.2, 0.8, 1.1));
+    object->instances.front()->set_mirror(Vec3d(mirrored ? -1. : 1., 1., 1.));
+    object->add_instance(*object->instances.front())->set_offset(Vec3d(170., 290., 0.));
+    object->cut_planes.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(10., 10., 10.);
+    plane.normal = Vec3d(0.3, 0.1, 1.).normalized();
+    object->cut_planes.planes.push_back(plane);
+    print.apply(model, config);
+    REQUIRE(print.objects().size() == 4);
+
+    PrintConfig writer_config;
+    writer_config.extruder_offset.values = {Vec2d(3., 5.)};
+    writer_config.z_offset.value = 0.2;
+    writer_config.z_hop.values = {0.4};
+    const Vec3d plate(100., 200., 0.);
+    const Vec3d calibration(-3., -5., 0.2);
+    int section_id = 0;
+    for (const PrintObject *section : print.objects()) {
+        REQUIRE(section->segment().has_value());
+        REQUIRE(section->instances().size() == 1);
+        const PrintInstance &instance = section->instances().front();
+        const Transform3d to_world = instance.get_slice_to_world_transform();
+        CHECK_THAT(to_world.linear().determinant(), Catch::Matchers::WithinAbs(1., 1e-9));
+        CHECK_THAT((to_world.linear().transpose() * to_world.linear() - Matrix3d::Identity()).norm(),
+            Catch::Matchers::WithinAbs(0., 1e-9));
+
+        GCode generator;
+        generator.apply_print_config(writer_config);
+        GCodeWriter &writer = generator.writer();
+        writer.set_xy_offset(plate.x(), plate.y());
+        writer.set_extruders({0});
+        writer.set_extruder(0);
+        // point_to_gcode() adds the instance's origin before handing XY to
+        // the writer; it must be removed before undoing the slicing frame.
+        const Vec3d origin(unscale<double>(instance.shift.x()), unscale<double>(instance.shift.y()), 0.);
+        generator.set_origin(origin.head<2>());
+        std::string program = "G90\nT0\n" + begin_section_frame(instance, generator.origin(), writer);
+        CHECK_THROWS_AS(begin_section_frame(instance, generator.origin(), writer), std::logic_error);
+        REQUIRE_FALSE(writer.is_current_position_clear());
+        // Match change_layer(): this Z is planned, not an emitted position.
+        writer.get_position().z() = 2.;
+        CHECK(writer.eager_lift(LiftType::NormalLift).empty());
+        CHECK(writer.unlift().empty());
+        for (const Vec3d &local : {Vec3d(2., 3., 4.), Vec3d(15., 17., 18.)}) {
+            const Vec3d sliced = section->trafo_sliced() * local;
+            // Independently place the original model point, then compensate
+            // its dimensions, keeping the copy's XY placement fixed.
+            const Vec3d offset = instance.model_instance->get_offset();
+            Vec3d expected = instance.model_instance->get_matrix() * local;
+            expected.x() = offset.x() + (expected.x() - offset.x()) * 100. / 98.;
+            expected.y() = offset.y() + (expected.y() - offset.y()) * 100. / 98.;
+            expected.z() *= 100. / 97.;
+            expected += calibration - plate;
+            GCodeReader reader;
+            Vec3d emitted = Vec3d::Zero();
+            const Vec2d xy = generator.point_to_gcode(Point::new_scale(sliced.x(), sliced.y()));
+            const std::string motion = writer.travel_to_xyz(Vec3d(xy.x(), xy.y(), sliced.z() + writer_config.z_offset.value));
+            program += motion;
+            CHECK(writer.is_current_position_clear());
+            reader.parse_buffer(motion,
+                [&](GCodeReader &state, const GCodeReader::GCodeLine &line) {
+                    if (line.cmd_is("G1"))
+                        emitted = Vec3d(line.new_X(state), line.new_Y(state), line.new_Z(state));
+                });
+            CHECK_THAT((emitted - expected).norm(), Catch::Matchers::WithinAbs(0., 0.002));
+        }
+        program += end_section_frame(writer);
+        CHECK_FALSE(writer.has_section_transform());
+        CHECK(end_section_frame(writer).empty());
+        program += writer.travel_to_xyz(writer.get_position() + Vec3d(1., 0., 0.));
+        GCodeProcessor processor;
+        processor.apply_config(writer_config);
+        processor.initialize_result_moves();
+        processor.process_buffer(program);
+        processor.finalize(false);
+        const auto &result = processor.get_result();
+        CHECK(result.nonplanar_metadata_valid);
+        size_t body_moves = 0;
+        for (const auto &move : result.moves) {
+            if (move.type != EMoveType::Travel || move.cut_segment_id < 0)
+                continue;
+            CHECK(move.cut_segment_id == section_id);
+            REQUIRE(move.tool_axis_id < result.tool_axes.size());
+            CHECK_THAT((result.tool_axes[move.tool_axis_id].cast<double>() - to_world.linear().col(2)).norm(),
+                Catch::Matchers::WithinAbs(0., 2e-6));
+            ++body_moves;
+        }
+        CHECK(body_moves > 0);
+        REQUIRE_FALSE(result.moves.empty());
+        CHECK(result.moves.back().cut_segment_id == -1);
+        ++section_id;
+    }
+}
+
+TEST_CASE("Section deposition height includes descending starts and ignores planned and nonprinting heights", "[GCodeWriter][Nonplanar]")
+{
+    PrintConfig config;
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    writer.seed_deposition_height(30.);
+    Transform3d frame = Transform3d::Identity();
+    frame.translation().z() = 10.;
+    writer.set_section_transform(frame);
+    writer.travel_to_xyz(Vec3d(1., 2., 40.));
+    CHECK(writer.max_deposited_machine_z() == 30.);
+    writer.get_position().z() += 500.; // planning must not inflate deposited height
+    writer.extrude_to_xyz(Vec3d(1., 3., 35.), 1.);
+    CHECK(writer.max_deposited_machine_z() == 50.);
+    writer.extrude_to_xyz(Vec3d(1., 4., 80.), -0.1);
+    writer.extrude_to_xyz(Vec3d(1., 5., 100.), 1., "", true);
+    CHECK(writer.max_deposited_machine_z() == 50.);
+    writer.extrude_to_xy(Vec2d(2., 5.), 1.);
+    CHECK(writer.max_deposited_machine_z() == 110.);
+    writer.seed_deposition_height(10.);
+    CHECK(writer.max_deposited_machine_z() == 110.);
+    writer.set_section_transform(std::nullopt);
+    writer.apply_print_config(config);
+    CHECK(writer.max_deposited_machine_z() == 0.);
+    CHECK_THROWS_AS(writer.seed_deposition_height(-1.), std::invalid_argument);
+}
+
+TEST_CASE("Section macro clearance uses deposited machine height without mutating local overrides", "[GCodeWriter][Nonplanar]")
+{
+    const int context = GENERATE(0, 1, 2);
+    struct HeightGCode : GCode {
+        HeightGCode()
+        {
+            PrintConfig config;
+            config.z_offset.value = 0.2;
+            m_config.apply(config, true);
+            m_writer.apply_print_config(config);
+            m_writer.set_extruders({0});
+            m_writer.set_extruder(0);
+            m_placeholder_parser_integration.init(m_writer);
+        }
+    } generator;
+    generator.writer().seed_deposition_height(70.2);
+    if (context == 1)
+        generator.writer().set_section_transform(Transform3d::Identity());
+    generator.writer().set_section_motion_limits(context == 2);
+    DynamicConfig overrides;
+    overrides.set_key_value("max_layer_z", new ConfigOptionFloat(1.));
+    const std::string output = generator.placeholder_parser_process("machine_end_gcode", "G1 Z{max_layer_z + 3}\n", 0, &overrides);
+    INFO(output);
+    REQUIRE(output.find("!!!!!") == std::string::npos);
+    GCodeReader reader;
+    float z = -1.f;
+    reader.parse_buffer(output, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
+        if (line.cmd_is("G1") && line.has(Z))
+            z = line.z();
+    });
+    CHECK_THAT(z, Catch::Matchers::WithinAbs(context == 0 ? 4. : 73.2, 0.001));
+    CHECK(overrides.opt_float("max_layer_z") == 1.);
+}
+
+TEST_CASE("Section acceleration bounds print and travel including inherited settings", "[GCodeWriter][Nonplanar]")
+{
+    const int context = GENERATE(0, 1, 2); // ordinary, section frame, global section transition
+    const bool section = context != 0;
+    const bool travel = GENERATE(false, true);
+    const unsigned int requested = GENERATE(0U, 50U, 5000U);
+    PrintConfig config;
+    config.gcode_flavor.value = gcfMarlinLegacy;
+    config.machine_max_acceleration_extruding.values = {10000., 10000.};
+    config.machine_max_acceleration_travel.values = {10000., 10000.};
+    config.machine_max_acceleration_z.values = {120.9, 120.9};
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    writer.set_section_motion_limits(context == 2);
+    if (context == 1)
+        writer.set_section_transform(Transform3d::Identity());
+    const std::string output = travel ? writer.set_travel_acceleration(requested) : writer.set_print_acceleration(requested);
+    const unsigned int expected = section ? (requested == 0 ? 120U : std::min(requested, 120U)) : requested;
+    size_t commands = 0;
+    GCodeReader reader;
+    reader.parse_buffer(output, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
+        if (line.cmd_is("M204")) {
+            float acceleration = 0.f;
+            REQUIRE(line.has_value('S', acceleration));
+            CHECK(acceleration == float(expected));
+            ++commands;
+        }
+    });
+    CHECK(commands == (expected > 0 ? 1 : 0));
+    writer.set_section_transform(std::nullopt);
+    writer.set_section_motion_limits(false);
+    CHECK_NOTHROW(writer.set_print_acceleration(5000));
+}
+
+TEST_CASE("Combined Klipper commands preserve the section Z acceleration bound", "[GCodeWriter][Nonplanar]")
+{
+    PrintConfig config;
+    config.gcode_flavor.value = gcfKlipper;
+    config.machine_max_acceleration_extruding.values = {10000., 10000.};
+    config.machine_max_acceleration_x.values = {10000., 10000.};
+    config.machine_max_acceleration_y.values = {10000., 10000.};
+    config.machine_max_acceleration_z.values = {120., 120.};
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    writer.set_section_transform(Transform3d::Identity());
+    CHECK(writer.set_accel_and_jerk(5000, 2.).find("ACCEL=120 ") != std::string::npos);
+    CHECK(writer.set_accel_and_jerk(5000, 2.).empty());
+    writer.set_section_transform(std::nullopt);
+    CHECK(writer.set_accel_and_jerk(5000, 2.).find("ACCEL=5000") != std::string::npos);
+}
+
+TEST_CASE("Section acceleration rejects an unset physical Z limit", "[GCodeWriter][Nonplanar]")
+{
+    PrintConfig config;
+    config.machine_max_acceleration_z.values = {0., 0.};
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    writer.set_section_transform(Transform3d::Identity());
+    CHECK_THROWS_AS(writer.set_print_acceleration(5000), std::invalid_argument);
+    CHECK_THROWS_AS(writer.set_travel_acceleration(0), std::invalid_argument);
+    writer.set_section_transform(std::nullopt);
+    CHECK_NOTHROW(writer.set_print_acceleration(5000));
+}
+
+TEST_CASE("Section travel respects configured physical Z speed on every mapped axis", "[GCodeWriter][Nonplanar]")
+{
+    const int context = GENERATE(0, 1, 2); // ordinary, section frame, global section transition
+    const bool section = context != 0;
+    const double z_speed = GENERATE(0., 4., 20.);
+    const int travel = GENERATE(0, 1, 2);
+    PrintConfig config;
+    config.travel_speed.values = {400.};
+    config.travel_speed_z.values = {z_speed};
+    config.machine_max_speed_z.values = {8., 8.};
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    writer.set_section_motion_limits(context == 2);
+    writer.set_is_first_layer(false);
+    writer.set_current_position_clear(true);
+    if (context == 1) {
+        Transform3d frame = Transform3d::Identity();
+        frame.rotate(Eigen::AngleAxisd(Geometry::deg2rad(45.), Vec3d::UnitX()));
+        writer.set_section_transform(frame);
+    }
+    const std::string output = travel == 0 ? writer.travel_to_xy(Vec2d(10., 20.)) :
+        travel == 1 ? writer.travel_to_xyz(Vec3d(10., 20., 30.)) : writer.travel_to_z(30.);
+    const double expected = section ? (z_speed > 0. ? std::min(z_speed, 8.) : 8.) :
+        (travel == 2 && z_speed > 0. ? z_speed : 400.);
+    size_t feedrates = 0;
+    GCodeReader reader;
+    reader.parse_buffer(output, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
+        if (line.cmd_is("G1") && line.has(F)) {
+            CHECK_THAT(line.f(), Catch::Matchers::WithinAbs(expected * 60., 0.001));
+            ++feedrates;
+        }
+    });
+    CHECK(feedrates > 0);
+}
+
+TEST_CASE("Section extrusion feed and cached wipe speed share the physical Z cap", "[GCodeWriter][Nonplanar]")
+{
+    const int context = GENERATE(0, 1, 2); // ordinary, section frame, global section transition
+    const bool section = context != 0;
+    const double requested = GENERATE(2., 200.);
+    PrintConfig config;
+    config.travel_speed_z.values = {4.};
+    config.machine_max_speed_z.values = {8., 8.};
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    writer.set_section_motion_limits(context == 2);
+    if (context == 1) {
+        Transform3d frame = Transform3d::Identity();
+        frame.rotate(Eigen::AngleAxisd(Geometry::deg2rad(45.), Vec3d::UnitX()));
+        writer.set_section_transform(frame);
+    }
+    const double expected = (section ? std::min(requested, 4.) : requested) * 60.;
+    const std::string output = writer.set_speed(requested * 60.);
+    CHECK_THAT(writer.get_current_speed(), Catch::Matchers::WithinAbs(expected, 1e-6));
+    size_t feedrates = 0;
+    GCodeReader reader;
+    reader.parse_buffer(output, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
+        if (line.has(F)) {
+            CHECK_THAT(line.f(), Catch::Matchers::WithinAbs(expected, 0.001));
+            ++feedrates;
+        }
+    });
+    CHECK(feedrates == 1);
+    writer.set_section_transform(std::nullopt);
+    writer.set_section_motion_limits(false);
+    writer.set_speed(requested * 60.);
+    CHECK_THAT(writer.get_current_speed(), Catch::Matchers::WithinAbs(requested * 60., 1e-6));
+}
+
+TEST_CASE("Section travel requires an explicit Z limit when the machine limit is unset", "[GCodeWriter][Nonplanar]")
+{
+    PrintConfig config;
+    config.travel_speed_z.values = {0.};
+    config.machine_max_speed_z.values = {0., 0.};
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    writer.set_section_transform(Transform3d::Identity());
+    const Vec3d before = writer.get_position();
+    const bool clear_before = writer.is_current_position_clear();
+    CHECK_THROWS_AS(writer.travel_to_xy(Vec2d(10., 20.)), std::invalid_argument);
+    CHECK(writer.get_position() == before);
+    CHECK(writer.is_current_position_clear() == clear_before);
+    writer.config.travel_speed_z.values = {4.};
+    CHECK_NOTHROW(writer.travel_to_xy(Vec2d(10., 20.)));
+    writer.set_section_transform(std::nullopt);
+    writer.config.travel_speed_z.values = {0.};
+    CHECK_NOTHROW(writer.travel_to_xy(Vec2d(20., 30.)));
+}
+
+TEST_CASE("Section motion leaves physical calibration outside the build-frame rotation", "[GCodeWriter][Nonplanar]")
+{
+    PrintConfig config;
+    config.extruder_offset.values = {Vec2d(3., 5.)};
+    config.z_offset.value = 0.2;
+    config.z_hop.values = {0.4};
+    config.retract_lift_above.values = {0.};
+    config.retract_lift_below.values = {0.};
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_xy_offset(100., 200.);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    Transform3d frame = Transform3d::Identity();
+    frame.rotate(Eigen::AngleAxisd(Geometry::deg2rad(30.), Vec3d::UnitY()));
+    frame.translation() = Vec3d(15., 120., 200.);
+    writer.set_section_transform(frame);
+    const Vec3d geometry(110., 220., 50.);
+    const Vec3d expected = frame * geometry + Vec3d(-103., -205., 0.2);
+    const std::string output = writer.travel_to_xyz(geometry + Vec3d(-3., -5., 0.2));
+    GCodeReader reader;
+    Vec3d emitted = Vec3d::Zero();
+    reader.parse_buffer(output, [&](GCodeReader &state, const GCodeReader::GCodeLine &line) {
+        if (line.cmd_is("G1"))
+            emitted = Vec3d(line.new_X(state), line.new_Y(state), line.new_Z(state));
+    });
+    CHECK_THAT((emitted - expected).norm(), Catch::Matchers::WithinAbs(0., 0.002));
+    CHECK_THAT((writer.position_for_custom_gcode() - expected).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    // change_layer() plans Z before any corresponding machine move.
+    writer.get_position().z() += 25.;
+    CHECK_THAT((writer.position_for_custom_gcode() - expected).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    CHECK(writer.eager_lift(LiftType::NormalLift).empty());
+    CHECK(writer.unlift().empty());
+    const Vec3d after_macro(120., 230., 80.);
+    writer.set_position_from_custom_gcode(after_macro);
+    CHECK_THAT((writer.position_for_custom_gcode() - after_macro).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    writer.get_position().z() += 50.;
+    writer.set_section_transform(std::nullopt);
+    CHECK_THAT((writer.get_position() - after_macro - Vec3d(100., 200., 0.)).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+}
+
+TEST_CASE("Section macro position follows emitted endpoints rather than planned layer Z", "[GCodeWriter][Nonplanar]")
+{
+    const int motion = GENERATE(0, 1, 2, 3, 4, 5);
+    PrintConfig config;
+    config.z_hop.values = {0.4};
+    config.retract_lift_above.values = {0.};
+    config.retract_lift_below.values = {0.};
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    Transform3d frame = Transform3d::Identity();
+    frame.rotate(Eigen::AngleAxisd(Geometry::deg2rad(45.), Vec3d::UnitX()));
+    frame.translation() = Vec3d(10., 20., 30.);
+    writer.set_section_transform(frame);
+    writer.travel_to_xyz(Vec3d(1., 2., 3.));
+    Vec3d endpoint(3., 4., 3.);
+    if (motion == 0) {
+        endpoint.z() = 5.;
+        writer.extrude_to_xyz(endpoint, 1.);
+    } else if (motion == 1)
+        writer.extrude_to_xy(endpoint.head<2>(), 1.);
+    else if (motion == 2)
+        writer.travel_to_xy(endpoint.head<2>());
+    else if (motion == 3) {
+        endpoint = Vec3d(1., 2., 5.);
+        writer.travel_to_z(endpoint.z(), "", true);
+    } else if (motion == 4)
+        writer.extrude_arc_to_xy(endpoint.head<2>(), Vec2d(0., 2.), 1., true);
+    else {
+        endpoint = Vec3d(1., 2., 3.4);
+        REQUIRE_FALSE(writer.eager_lift(LiftType::NormalLift).empty());
+    }
+    const Vec3d expected = frame * endpoint;
+    CHECK_THAT((writer.position_for_custom_gcode() - expected).norm(), Catch::Matchers::WithinAbs(0., 1e-8));
+    writer.get_position().z() += 10.;
+    CHECK_THAT((writer.position_for_custom_gcode() - expected).norm(), Catch::Matchers::WithinAbs(0., 1e-8));
+    writer.set_section_transform(std::nullopt);
+    CHECK_THAT((writer.get_position() - expected).norm(), Catch::Matchers::WithinAbs(0., 1e-8));
+}
+
+TEST_CASE("Tilted arcs emit linear XYZ moves without changing their extrusion amount", "[GCodeWriter][Nonplanar]")
+{
+    PrintConfig config;
+    config.use_relative_e_distances.value = false;
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    Transform3d frame = Transform3d::Identity();
+    frame.rotate(Eigen::AngleAxisd(Geometry::deg2rad(30.), Vec3d::UnitY()));
+    writer.set_section_transform(frame);
+    writer.set_position(Vec3d(1., 0., 1.));
+    const std::string output = writer.extrude_arc_to_xy(Vec2d(-1., 0.), Vec2d(-1., 0.), 2., true);
+    GCodeReader reader;
+    size_t moves = 0;
+    Vec3d emitted = Vec3d::Zero();
+    double extrusion = 0.;
+    reader.parse_buffer(output, [&](GCodeReader &state, const GCodeReader::GCodeLine &line) {
+        CHECK_FALSE(line.cmd_is("G2"));
+        CHECK_FALSE(line.cmd_is("G3"));
+        if (line.cmd_is("G1")) {
+            ++moves;
+            emitted = Vec3d(line.new_X(state), line.new_Y(state), line.new_Z(state));
+            extrusion = line.new_E(state);
+        }
+    });
+    CHECK(moves > 2);
+    CHECK_THAT((emitted - frame * Vec3d(-1., 0., 1.)).norm(), Catch::Matchers::WithinAbs(0., 0.002));
+    CHECK_THAT(extrusion, Catch::Matchers::WithinAbs(2., 1e-5));
+
+    Transform3d invalid = Transform3d::Identity();
+    invalid.scale(2.);
+    CHECK_THROWS_AS(writer.set_section_transform(invalid), std::invalid_argument);
+    invalid = Transform3d::Identity();
+    invalid.matrix()(3, 3) = 0.;
+    CHECK_THROWS_AS(writer.set_section_transform(invalid), std::invalid_argument);
+}
+
+TEST_CASE("Custom templates exchange machine positions while generated motion stays in a section frame", "[GCodeWriter][Nonplanar]")
+{
+    const bool shifted_plate = GENERATE(false, true);
+    const bool mapped_section = GENERATE(false, true);
+    struct TemplateGCode : GCode {
+        void initialize()
+        {
+            PrintConfig config;
+            config.use_relative_e_distances.value = false;
+            m_config.apply(config, true);
+            m_writer.apply_print_config(config);
+            m_writer.set_extruders({0});
+            m_writer.set_extruder(0);
+            m_placeholder_parser_integration.init(m_writer);
+        }
+    } generator;
+    generator.initialize();
+    if (shifted_plate)
+        generator.writer().set_xy_offset(100., 200.);
+    Transform3d frame = Transform3d::Identity();
+    if (mapped_section) {
+        frame.rotate(Eigen::AngleAxisd(Geometry::deg2rad(30.), Vec3d::UnitY()));
+        frame.translation() = Vec3d(5., 7., 10.);
+        generator.writer().set_section_transform(frame);
+    } else
+        generator.writer().set_section_motion_limits(true);
+    generator.writer().set_position_from_custom_gcode(Vec3d(12., 15., 20.));
+    generator.writer().get_position().z() += 10.; // planned layer, no emitted motion
+    const std::string output = generator.placeholder_parser_process("machine_end_gcode",
+        "G1 X{position[0]} Y{position[1]} Z{position[2]}\n{position[0] = 16}{position[2] = 25}", 0);
+    CHECK(output.find("!!!!!") == std::string::npos);
+    GCodeReader reader;
+    Vec3d command = Vec3d::Zero();
+    reader.parse_buffer(output, [&](GCodeReader &state, const GCodeReader::GCodeLine &line) {
+        if (line.cmd_is("G1"))
+            command = Vec3d(line.new_X(state), line.new_Y(state), line.new_Z(state));
+    });
+    CHECK_THAT((command - Vec3d(12., 15., 20.)).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    CHECK_THAT((generator.writer().position_for_custom_gcode() - Vec3d(16., 15., 25.)).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    const Vec3d logical = generator.writer().get_position();
+    CHECK(generator.last_pos() == generator.gcode_to_point(Vec2d(logical.x(), logical.y())));
+    const Vec3d plate = shifted_plate ? Vec3d(100., 200., 0.) : Vec3d(0., 0., 0.);
+    CHECK_THAT((generator.writer().get_position() - frame.inverse() * (Vec3d(16., 15., 25.) + plate)).norm(),
+        Catch::Matchers::WithinAbs(0., 1e-9));
+}
 
 TEST_CASE("Belt machine coordinates retain a non-45-degree slicing angle", "[GCodeWriter][belt]")
 {
@@ -1773,4 +2303,150 @@ TEST_CASE("Initial filament start G-code tolerates a list shorter than the filam
     print.validate();
 
     REQUIRE_NOTHROW(Slic3r::Test::gcode(print));
+}
+
+TEST_CASE("Global section transitions exchange macro positions in machine coordinates on other plates", "[GCodeWriter][Nonplanar]")
+{
+    const bool section_motion = GENERATE(false, true);
+    PrintConfig config;
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_xy_offset(100., 200.);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    writer.set_section_motion_limits(section_motion);
+    writer.travel_to_xyz(Vec3d(112., 215., 20.));
+    const Vec3d expected = section_motion ? Vec3d(12., 15., 20.) : Vec3d(112., 215., 20.);
+    CHECK_THAT((writer.position_for_custom_gcode() - expected).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    const Vec3d command(16., 18., 25.);
+    writer.set_position_from_custom_gcode(command);
+    CHECK_THAT((writer.position_for_custom_gcode() - command).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    if (section_motion) {
+        CHECK_THAT((writer.get_position() - Vec3d(116., 218., 25.)).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+        GCodeReader reader;
+        Vec3d emitted = Vec3d::Zero();
+        // The raw macro already moved Z. The following writer command may
+        // legitimately emit only XY, so parse the complete machine trace.
+        const std::string followup = writer.travel_to_xyz(writer.get_position());
+        REQUIRE_FALSE(followup.empty());
+        const std::string output = "G1 X16 Y18 Z25\n" + followup;
+        reader.parse_buffer(output, [&](GCodeReader &state, const GCodeReader::GCodeLine &line) {
+            if (line.cmd_is("G1"))
+                emitted = Vec3d(line.new_X(state), line.new_Y(state), line.new_Z(state));
+        });
+        CHECK_THAT((emitted - command).norm(), Catch::Matchers::WithinAbs(0., 0.002));
+    } else
+        CHECK_THAT((writer.get_position() - command).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+}
+
+TEST_CASE("Global section motion remembers only axes actually emitted after layer planning", "[GCodeWriter][Nonplanar]")
+{
+    const bool after_frame = GENERATE(false, true);
+    const int motion = GENERATE(0, 1, 2, 3, 4);
+    PrintConfig config;
+    config.z_hop.values = {0.4};
+    config.retract_lift_above.values = {0.};
+    config.retract_lift_below.values = {0.};
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_xy_offset(100., 200.);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    writer.set_section_motion_limits(true);
+    writer.travel_to_xyz(Vec3d(112., 215., 20.), "", true);
+    if (after_frame) {
+        writer.set_section_transform(Transform3d::Identity());
+        writer.set_section_transform(std::nullopt);
+    }
+    writer.get_position().z() = 70.; // planned, never emitted
+    CHECK(writer.eager_lift(LiftType::NormalLift).empty());
+    CHECK(writer.eager_lift(LiftType::SpiralLift).empty());
+    Vec3d expected(16., 18., 20.);
+    if (motion == 0)
+        writer.travel_to_xy(Vec2d(116., 218.));
+    else if (motion == 1)
+        writer.extrude_to_xy(Vec2d(116., 218.), 1.);
+    else if (motion == 2) {
+        writer.get_position().head<2>() = Vec2d(180., 290.); // uncommanded XY
+        writer.travel_to_z(30., "", true);
+        expected = Vec3d(12., 15., 30.);
+    } else if (motion == 3) {
+        writer.travel_to_xyz(Vec3d(116., 218., 30.), "", true);
+        expected.z() = 30.;
+    } else
+        writer.extrude_arc_to_xy(Vec2d(116., 218.), Vec2d(0., 3.), 1., true);
+    CHECK_THAT((writer.position_for_custom_gcode() - expected).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    if (motion == 1 || motion == 4)
+        CHECK_THAT(writer.max_deposited_machine_z(), Catch::Matchers::WithinAbs(20., 1e-9));
+    // Entering another frame consumes the physical endpoint, not planned axes.
+    writer.set_section_transform(Transform3d::Identity());
+    CHECK_THAT((writer.get_position() - expected - Vec3d(100., 200., 0.)).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    writer.set_section_transform(std::nullopt);
+    writer.apply_print_config(config);
+    writer.set_section_motion_limits(true);
+    writer.get_position() = Vec3d(102., 203., 4.);
+    CHECK_THAT((writer.position_for_custom_gcode() - Vec3d(2., 3., 4.)).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+}
+
+TEST_CASE("Global spiral lifts retain physical Z speed limits during section exports", "[GCodeWriter][Nonplanar]")
+{
+    const bool arc_fitting = GENERATE(false, true);
+    PrintConfig config;
+    config.enable_arc_fitting.value = arc_fitting;
+    config.printable_area.values = {Vec2d(0., 0.), Vec2d(250., 0.), Vec2d(250., 250.), Vec2d(0., 250.)};
+    config.z_hop.values = {0.4};
+    config.retract_lift_above.values = {0.};
+    config.retract_lift_below.values = {0.};
+    config.travel_speed_z.values = {50.};
+    config.machine_max_speed_z.values = {4., 4.};
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    writer.set_section_motion_limits(true);
+    writer.travel_to_xyz(Vec3d(100., 100., 5.), "", true);
+    const std::string output = writer.eager_lift(LiftType::SpiralLift);
+    REQUIRE_FALSE(output.empty());
+    CHECK((output.find("G3") != std::string::npos) == arc_fitting);
+    GCodeReader reader;
+    size_t feed_commands = 0;
+    reader.parse_buffer(output, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
+        if (line.has(F)) {
+            ++feed_commands;
+            CHECK(line.value(F) <= 240.f);
+        }
+    });
+    CHECK(feed_commands > 0);
+    CHECK_THAT((writer.position_for_custom_gcode() - Vec3d(100., 100., 5.4)).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+}
+
+TEST_CASE("Deferred section lifts do not start spiral or slope motion from an uncommanded pose", "[GCodeWriter][Nonplanar]")
+{
+    const LiftType lift = GENERATE(LiftType::SpiralLift, LiftType::SlopeLift);
+    PrintConfig config;
+    config.printable_area.values = {Vec2d(0., 0.), Vec2d(250., 0.), Vec2d(250., 250.), Vec2d(0., 250.)};
+    config.enable_arc_fitting.value = true;
+    config.z_hop.values = {0.4};
+    config.retract_lift_above.values = {0.};
+    config.retract_lift_below.values = {0.};
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    writer.set_section_motion_limits(true);
+    writer.travel_to_xyz(Vec3d(100., 100., 5.), "", true);
+    writer.get_position().z() = 10.; // planned next layer
+    writer.lazy_lift(lift);
+    const std::string output = writer.travel_to_xyz(Vec3d(120., 120., 10.), "", true);
+    CHECK(output.find("G3") == std::string::npos);
+    GCodeReader reader;
+    size_t moves = 0;
+    reader.parse_buffer(output, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
+        if (line.cmd_is("G1") && line.has(X) && line.has(Y)) {
+            ++moves;
+            CHECK_THAT(line.value(X), Catch::Matchers::WithinAbs(120., 0.001));
+            CHECK_THAT(line.value(Y), Catch::Matchers::WithinAbs(120., 0.001));
+        }
+    });
+    CHECK(moves == 1);
 }
