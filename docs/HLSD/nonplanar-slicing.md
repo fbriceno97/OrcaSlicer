@@ -63,14 +63,21 @@ contact, overhang and enforcer footprints against the section's bounds over the
 whole support layer-height span before installing support layers. Floors and ceilings both limit this region; only
 floors provide load-bearing heights. The physical world-Z build plate is carried
 into the section frame even for a tilted root. Ordinary objects leave this
-clipping inactive. Parent support-demand propagation and the separate classic
-tree-support path still require integration before section export can be enabled.
+clipping inactive. A final containment pass applies to all support generators,
+including classic tree: it clips expanded paths at full bead width and height,
+retains flow metadata and island ordering, opens loops at boundaries, and rebuilds
+support footprints from the resulting paths. It rejects contoured or sloped support
+paths rather than flattening their Z data. Parent support-demand propagation and
+classic tree branch anchoring still require integration before section export can
+be enabled.
 
 Derived sections are rejected by print validation, processing, and export while
 safe section transitions and support propagation remain incomplete. A sequential
 export scope binds the per-copy frame, writes unique section/build-axis metadata,
 resets cooling in physical coordinates and closes the frame before global motion.
-Exception cleanup restores the ordinary writer frame. This scope remains behind
+Exception cleanup restores the ordinary writer frame. Entering a section marks
+the logical position as uncommanded until the first absolute XYZ move, so layer
+setup cannot trigger a lift through a planned position. This scope remains behind
 the export guard; frame binding alone does not establish complete motion safety
 or correct section-layer settings. This includes explicitly directed
 parts with zero rotation: their rebased layer schedules still require section
@@ -89,7 +96,8 @@ Reloading moves also reloads their direction palette. Annotated section travel
 retains its physical Z even during a custom start stage,
 so preview preparation-stage flattening cannot hide a clearance move.
 Export and edited-file collision processing also explicitly preserve preparation
-Z for unannotated motion. Removing section comments cannot restore display-only
+Z for unannotated motion. Processed-result assignment preserves Z calibration;
+fresh and reset results use zero calibration. Removing section comments cannot restore display-only
 Z flattening in the data used for clearance checks.
 With non-planar mode enabled, export checks annotated output before renaming its temporary file, and checks
 edited G-code before file export or raw-G-code host upload. These checks describe

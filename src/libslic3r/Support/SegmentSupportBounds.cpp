@@ -1,5 +1,9 @@
 #include "SegmentSupportBounds.hpp"
 #include "../ClipperUtils.hpp"
+#include "../ExtrusionEntity.hpp"
+#include "../ExtrusionEntityCollection.hpp"
+#include "../ExPolygon.hpp"
+#include "../Polyline.hpp"
 #include "../Print.hpp"
 #include "../CutPlaneSegmentation.hpp"
 #include "../Point.hpp"
@@ -10,6 +14,8 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <functional>
+#include <memory>
 #include <utility>
 #include <stdexcept>
 
@@ -83,6 +89,59 @@ SegmentSupportBounds::SegmentSupportBounds(const PrintObject &object, double bed
     const Vec3d normal = to_world.linear().row(2).transpose();
     m_planes.push_back({normal, bed_clearance - to_world.translation().z(), false});
     m_active = true;
+}
+
+void SegmentSupportBounds::clip_extrusions(ExtrusionEntityCollection &extrusions,
+    coordf_t print_z, coordf_t layer_height) const
+{
+    if (!is_active())
+        return;
+    // Build before replacing the source, so invalid geometry leaves it intact.
+    const auto clip_path = [&](const ExtrusionPath &path, ExtrusionEntityCollection &output) {
+        if (path.z_contoured || dynamic_cast<const ExtrusionPathContoured *>(&path) ||
+            dynamic_cast<const ExtrusionPathSloped *>(&path) ||
+            !std::isfinite(path.width) || path.width <= 0.f ||
+            !std::isfinite(path.height) || path.height <= 0.f)
+            throw std::invalid_argument("Invalid or nonplanar section support path");
+        const Polygons valid = valid_region_polygon(print_z, std::max(layer_height, double(path.height)));
+        const ExPolygons centers = offset_ex(valid, -scale_(double(path.width) / 2.));
+        const Polyline source = path.polyline.to_polyline();
+        Polylines fragments = intersection_pl(Polylines{source}, centers);
+        restore_source_path_order(source, fragments);
+        for (const Polyline &fragment : fragments) {
+            std::unique_ptr<ExtrusionEntity> entity(path.clone());
+            auto *clipped_path = static_cast<ExtrusionPath *>(entity.get());
+            clipped_path->polyline = Polyline3(fragment);
+            output.entities.push_back(entity.release());
+        }
+    };
+    std::function<std::unique_ptr<ExtrusionEntityCollection>(const ExtrusionEntity &)> clip_entity;
+    clip_entity = [&](const ExtrusionEntity &entity) {
+        auto output = std::make_unique<ExtrusionEntityCollection>();
+        output->no_sort = true;
+        if (const auto *collection = dynamic_cast<const ExtrusionEntityCollection *>(&entity)) {
+            *output = *collection;
+            output->clear();
+            for (const ExtrusionEntity *child : collection->entities) {
+                auto clipped = clip_entity(*child);
+                if (!clipped->empty())
+                    output->entities.push_back(clipped.release());
+            }
+        } else if (const auto *path = dynamic_cast<const ExtrusionPath *>(&entity))
+            clip_path(*path, *output);
+        else if (const auto *loop = dynamic_cast<const ExtrusionLoop *>(&entity)) {
+            for (const ExtrusionPath &path : loop->paths)
+                clip_path(path, *output);
+        } else if (const auto *multipath = dynamic_cast<const ExtrusionMultiPath *>(&entity)) {
+            for (const ExtrusionPath &path : multipath->paths)
+                clip_path(path, *output);
+        } else
+            throw std::invalid_argument("Unsupported section support extrusion entity");
+        return output;
+    };
+    auto clipped = clip_entity(extrusions);
+    extrusions.clear();
+    extrusions = std::move(*clipped);
 }
 
 Polygons SegmentSupportBounds::valid_region_polygon(coordf_t print_z, coordf_t layer_height) const

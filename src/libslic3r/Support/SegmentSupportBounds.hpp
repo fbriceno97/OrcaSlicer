@@ -34,6 +34,7 @@
 namespace Slic3r {
 
 class PrintObject;
+class ExtrusionEntityCollection;
 
 class SegmentSupportBounds
 {
@@ -57,6 +58,11 @@ public:
     explicit SegmentSupportBounds(const PrintObject &object, double bed_clearance = 0.);
 
     bool is_active() const { return m_active; }
+
+    // Final containment after generators expand brims, roofs or branch walls.
+    // Preserve nested island ordering and flow metadata. Clip full bead width
+    // and layer height, opening loops at a section boundary when necessary.
+    void clip_extrusions(ExtrusionEntityCollection &extrusions, coordf_t print_z, coordf_t layer_height) const;
 
     // XY region at layer print_z where support is ALLOWED: the segment side of ALL bounds
     // (intersection of the half-planes), floors and ceilings alike.

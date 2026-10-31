@@ -1,3 +1,4 @@
+#include "Support/SegmentSupportBounds.hpp"
 #include "ExPolygon.hpp"
 #include "Config.hpp"
 #include "Exception.hpp"
@@ -980,6 +981,15 @@ void PrintObject::generate_support_material(bool with_belt_brim)
             m_print->set_status(50, L("Generating support"));
 
             this->_generate_support_material();
+            const SegmentSupportBounds section_bounds(*this);
+            if (section_bounds.is_active())
+                for (SupportLayer *layer : m_support_layers) {
+                    m_print->throw_if_canceled();
+                    section_bounds.clip_extrusions(layer->support_fills, layer->print_z, layer->height);
+                    Polygons covered;
+                    layer->support_fills.polygons_covered_by_width(covered, 0.f);
+                    layer->support_islands = union_ex(covered);
+                }
             m_print->throw_if_canceled();
         }
         // Orca: the tree support collision/avoidance caches and support nodes are only used while this step runs

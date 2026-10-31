@@ -1,4 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/generators/catch_generators.hpp>
+#include "libslic3r/ExtrusionEntity.hpp"
+#include "libslic3r/ExtrusionEntityCollection.hpp"
+#include "libslic3r/ClipperUtils.hpp"
+#include "libslic3r/Polyline.hpp"
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
 
@@ -216,4 +221,61 @@ TEST_CASE("The root's first support layer survives the bed plane raised by its o
     REQUIRE(bounds.is_active());
     CHECK(! bounds.valid_region_polygon(first_layer).empty());
     CHECK(  bounds.valid_region_polygon(first_layer - 0.1).empty());
+}
+
+TEST_CASE("Final support containment clips expanded paths and nested islands at bead width", "[cutplanes][supports]")
+{
+    const int kind = GENERATE(0, 1, 2);
+    const SegmentSupportBounds bounds(non_root_segment({
+        clip_keeping_above(Vec3d::UnitX(), 0., CutClipRole::Floor),
+        clip_keeping_above(-Vec3d::UnitX(), -10., CutClipRole::Ceiling),
+        clip_keeping_above(Vec3d::UnitZ(), 0., CutClipRole::Floor)}), Transform3d::Identity());
+    ExtrusionPath path(erSupportMaterialInterface, 0.4, 2.f, 0.2f);
+    path.polyline = Polyline3(Polyline({Point::new_scale(-5., -5.), Point::new_scale(15., -5.),
+        Point::new_scale(15., 5.), Point::new_scale(-5., 5.), Point::new_scale(-5., -5.)}));
+    ExtrusionEntityCollection source;
+    source.no_sort = true;
+    auto *island = new ExtrusionEntityCollection();
+    island->no_sort = true;
+    if (kind == 0)
+        island->entities.push_back(path.clone());
+    else if (kind == 1)
+        island->entities.push_back(new ExtrusionLoop(ExtrusionPaths{path}));
+    else
+        island->entities.push_back(new ExtrusionMultiPath(ExtrusionPaths{path}));
+    source.entities.push_back(island);
+    bounds.clip_extrusions(source, 1., 0.2);
+    REQUIRE_FALSE(source.empty());
+    CHECK(source.no_sort);
+    CHECK(source.min_mm3_per_mm() == 0.4);
+    CHECK(source.role() == erSupportMaterialInterface);
+    const Polylines lines = source.as_polylines();
+    REQUIRE_FALSE(lines.empty());
+    for (const Polyline &line : lines)
+        for (const Point &point : line.points) {
+            CHECK(unscale<double>(point.x()) >= 1. - 1e-5);
+            CHECK(unscale<double>(point.x()) <= 9. + 1e-5);
+        }
+    // The entire bead, rather than only its center line, must fit the section.
+    Polygons covered;
+    source.polygons_covered_by_width(covered, 0.f);
+    CHECK(diff(covered, offset(bounds.valid_region_polygon(1., 0.2), scale_(0.001))).empty());
+    // A bead extending below the floor has no valid deposition region.
+    bounds.clip_extrusions(source, 0.1, 0.2);
+    CHECK(source.empty());
+}
+
+TEST_CASE("Invalid final support geometry leaves source ownership intact", "[cutplanes][supports]")
+{
+    const SegmentSupportBounds bounds(non_root_segment({
+        clip_keeping_above(Vec3d::UnitX(), 0., CutClipRole::Floor)}), Transform3d::Identity());
+    ExtrusionEntityCollection source;
+    auto *path = new ExtrusionPath(erSupportMaterial, 0.1, -1.f, 0.2f);
+    source.entities.push_back(path);
+    CHECK_THROWS_AS(bounds.clip_extrusions(source, 1., 0.2), std::invalid_argument);
+    REQUIRE(source.entities.size() == 1);
+    CHECK(source.entities.front() == path);
+    const SegmentSupportBounds ordinary;
+    CHECK_NOTHROW(ordinary.clip_extrusions(source, 1., 0.2));
+    CHECK(source.entities.front() == path);
 }
