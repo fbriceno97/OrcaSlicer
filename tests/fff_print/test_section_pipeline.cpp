@@ -262,7 +262,7 @@ TEST_CASE("Production export preserves section order and world heights for a per
         {"enable_support", "0"}, {"layer_height", "0.2"}, {"initial_layer_print_height", "0.2"},
         {"sparse_infill_density", "0%"}, {"top_shell_layers", "0"}, {"bottom_shell_layers", "0"},
         {"top_shell_thickness", "0"}, {"bottom_shell_thickness", "0"},
-        {"wall_loops", "2"}, {"skirts", "0"}, {"brim_type", "no_brim"},
+        {"wall_loops", "2"}, {"skirt_loops", "0"}, {"brim_type", "no_brim"},
         {"use_relative_e_distances", "1"}, {"travel_speed_z", "4"},
         {"machine_start_gcode", "G90\nM83\nG1 X0 Y0 Z2 F240\n"},
         {"machine_end_gcode", "M400\n"}, {"before_layer_change_gcode", ""},
