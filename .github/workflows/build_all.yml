@@ -55,7 +55,7 @@ jobs:
         run: .\scripts\test_build_win.ps1
 
   windows-x64-clearance-tests:
-    name: Windows x64 hotend clearance geometry tests
+    name: Windows x64 clearance and section-preview geometry tests
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4

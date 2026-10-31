@@ -42,6 +42,9 @@ shift a macro move by the plate offset a second time.
 The initial toolpath preview uses the same per-copy inverse slicing map to place
 section perimeter, infill and support vertices back in world geometry. Machine
 calibration is excluded from this model-space view.
+Section preview keeps local layer order in separate slider ranges rather than
+sorting vertices by world Z. A tilted layer has varying world Z, and an upper
+section's rebased heights cannot be compared with its physical coordinates.
 
 A model-space bound `n*x <= d` becomes `n_s*s <= d + n_s*t`, where
 `n_s = inverse(A).transpose()*n`. At each slice height this is an XY half-plane.

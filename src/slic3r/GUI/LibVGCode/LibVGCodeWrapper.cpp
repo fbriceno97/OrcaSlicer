@@ -32,6 +32,7 @@
 #include "libslic3r/PrintConfig.hpp"
 #include "../../src/libvgcode/include/GCodeInputData.hpp"
 #include "../../src/libvgcode/include/PathVertex.hpp"
+#include "libvgcode/include/SectionPreview.hpp"
 #include "libvgcode/include/Types.hpp"
 #include "libslic3r/Config.hpp"
 #include "libslic3r/Model.hpp"
@@ -866,21 +867,35 @@ GCodeInputData convert(const Slic3r::Print& print, const std::vector<std::string
     // We need to collect vertices in the first layer for all objects, push them into the output vector
     // and then do the same for all the layers. The algorithm relies on the fact that the vertices from
     // lower layers are always placed after vertices from the higher layer.
-    std::vector<size_t> vert_indices(data.size(), 0);
-    for (size_t layer_id = 0; layer_id < layers.size(); ++layer_id) {
-        const float layer_z = layers[layer_id];
-        for (size_t obj_idx = 0; obj_idx < data.size(); ++obj_idx) {
-            // d contains PathVertices for one object. Let's stuff everything below this layer_z into ret.vertices.
-            const size_t start_idx = vert_indices[obj_idx];
-            size_t idx = start_idx;
-            while (idx < data[obj_idx].vertices.size() && data[obj_idx].vertices[idx].position[2] <= layer_z)
-                ++idx;
-            // We have found a vertex above current layer_z. Let's copy the vertices into the output
-            // and remember where to start when we process another layer.
-            ret.vertices.insert(ret.vertices.end(),
-                                data[obj_idx].vertices.begin() + start_idx,
-                                data[obj_idx].vertices.begin() + idx);
-            vert_indices[obj_idx] = idx;
+    const auto objects = print.objects();
+    const bool has_sections = std::any_of(objects.begin(), objects.end(), [](const Slic3r::PrintObject *object) {
+        return object->segment().has_value();
+    });
+    if (has_sections) {
+        // Tilted/rebased sections have no single world Z for a local layer.
+        // Merging by position[2] would truncate tilted paths and drop an upper
+        // section entirely when its physical Z exceeds its local layer range.
+        // Keep each section's layer order and give it a distinct slider range.
+        uint32_t layer_offset = 0;
+        for (const VerticesData &d : data)
+            layer_offset = append_section_vertices(ret.vertices, d.vertices, layer_offset);
+    } else {
+        std::vector<size_t> vert_indices(data.size(), 0);
+        for (size_t layer_id = 0; layer_id < layers.size(); ++layer_id) {
+            const float layer_z = layers[layer_id];
+            for (size_t obj_idx = 0; obj_idx < data.size(); ++obj_idx) {
+                // d contains PathVertices for one object. Let's stuff everything below this layer_z into ret.vertices.
+                const size_t start_idx = vert_indices[obj_idx];
+                size_t idx = start_idx;
+                while (idx < data[obj_idx].vertices.size() && data[obj_idx].vertices[idx].position[2] <= layer_z)
+                    ++idx;
+                // We have found a vertex above current layer_z. Let's copy the vertices into the output
+                // and remember where to start when we process another layer.
+                ret.vertices.insert(ret.vertices.end(),
+                                    data[obj_idx].vertices.begin() + start_idx,
+                                    data[obj_idx].vertices.begin() + idx);
+                vert_indices[obj_idx] = idx;
+            }
         }
     }
 
