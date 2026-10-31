@@ -830,13 +830,17 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
         return changes;
     }
 
-    static std::optional<Vec3d> section_custom_gcode_endpoint(const std::string &gcode, Vec3d position)
+    static std::optional<Vec3d> section_custom_gcode_endpoint(std::string &gcode, Vec3d position,
+        double max_feedrate, double &feedrate)
     {
         bool relative = false, moved = false;
+        unsigned conditional_depth = 0;
         double units = 1.;
+        std::string bounded;
         GCodeReader parser;
         parser.parse_buffer(gcode, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
             const auto cmd = line.cmd();
+            auto adjusted = line;
             if (ascii_iequals(cmd, "G90"))
                 relative = false;
             else if (ascii_iequals(cmd, "G91"))
@@ -845,25 +849,52 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
                 units = 25.4;
             else if (ascii_iequals(cmd, "G21"))
                 units = 1.;
-            else if (ascii_iequals(cmd, "G0") || ascii_iequals(cmd, "G1") ||
-                     ascii_iequals(cmd, "G2") || ascii_iequals(cmd, "G3")) {
+            else if (ascii_iequals(cmd, "M622"))
+                ++conditional_depth;
+            else if (ascii_iequals(cmd, "M623")) {
+                if (conditional_depth == 0)
+                    throw std::runtime_error(_u8L("Section custom G-code must contain complete firmware conditionals."));
+                --conditional_depth;
+            } else if (ascii_iequals(cmd, "G0") || ascii_iequals(cmd, "G1") ||
+                       ascii_iequals(cmd, "G2") || ascii_iequals(cmd, "G3")) {
+                if (line.has(E))
+                    throw std::runtime_error(_u8L("Extrusion moves in section custom G-code are not supported. Remove extrusion moves from the section macro."));
+                if (line.has(F)) {
+                    const double requested = double(line.f()) * units;
+                    if (!std::isfinite(requested) || requested <= 0.)
+                        throw std::runtime_error(_u8L("Section custom G-code requires a positive finite feed rate."));
+                    feedrate = std::min(requested, max_feedrate);
+                }
                 for (const Axis axis : {X, Y, Z})
                     if (line.has(axis)) {
+                        if (conditional_depth != 0)
+                            throw std::runtime_error(_u8L("Conditional XYZ moves are not supported in section custom G-code."));
                         const double value = double(line.value(axis)) * units;
                         position[int(axis)] = relative ? position[int(axis)] + value : value;
                         moved = true;
                     }
-            } else if ((ascii_iequals(cmd, "G92") && (line.has(X) || line.has(Y) || line.has(Z))) ||
-                       ascii_iequals(cmd, "G28") || ascii_iequals(cmd, "G29") ||
-                       ascii_iequals(cmd, "G53") || ascii_iequals(cmd, "G54") ||
-                       ascii_iequals(cmd, "G55") || ascii_iequals(cmd, "G56") ||
-                       ascii_iequals(cmd, "G57") || ascii_iequals(cmd, "G58") || ascii_iequals(cmd, "G59"))
-                throw std::runtime_error(_u8L("Section custom G-code cannot home axes or change the machine coordinate origin."));
+                // Bound raw macro motion as well as generated moves. Explicit
+                // feed words preserve the same physical cap in temporary inch mode.
+                adjusted.set(F, std::floor(feedrate / units * 1e6) / 1e6, 6);
+            } else if (ascii_iequals(cmd, "G92") || ascii_iequals(cmd, "G28") ||
+                       ascii_iequals(cmd, "G29") || ascii_iequals(cmd, "G53") ||
+                       ascii_iequals(cmd, "G54") || ascii_iequals(cmd, "G55") ||
+                       ascii_iequals(cmd, "G56") || ascii_iequals(cmd, "G57") ||
+                       ascii_iequals(cmd, "G58") || ascii_iequals(cmd, "G59"))
+                throw std::runtime_error(_u8L("Section custom G-code cannot home axes or change coordinate origins."));
+            else if (ascii_iequals(cmd, "M201") || ascii_iequals(cmd, "M202") ||
+                     ascii_iequals(cmd, "M204") || ascii_iequals(cmd, "M205") ||
+                     ascii_iequals(cmd, "M207") || ascii_iequals(cmd, "M566") ||
+                     ascii_iequals(cmd, "SET_VELOCITY_LIMIT"))
+                throw std::runtime_error(_u8L("Section custom G-code must leave motion limits to generated G-code."));
+            bounded += adjusted.raw();
+            bounded += '\n';
         });
-        if (relative || units != 1.)
-            throw std::runtime_error(_u8L("Section custom G-code must restore absolute XYZ positioning and millimeter units."));
+        if (relative || units != 1. || conditional_depth != 0)
+            throw std::runtime_error(_u8L("Section custom G-code must restore absolute XYZ positioning, millimeter units and firmware conditional state."));
         if (!position.allFinite())
             throw std::runtime_error(_u8L("Section custom G-code produced a nonfinite machine position."));
+        gcode = std::move(bounded);
         return moved ? std::optional<Vec3d>(position) : std::nullopt;
     }
 
@@ -5421,9 +5452,19 @@ PlaceholderParserIntegration &ppi = m_placeholder_parser_integration;
         if (motion_state_changes.jerk)
             m_writer.invalidate_jerk();
 
-        const auto raw_endpoint = m_writer.has_section_transform()
-            ? section_custom_gcode_endpoint(output, Vec3d(ppi.position[0], ppi.position[1], ppi.position[2]))
-            : std::nullopt;
+        std::optional<Vec3d> raw_endpoint;
+        if (m_writer.has_section_transform()) {
+            const std::string bounded_feed = m_writer.set_speed(m_writer.get_current_speed());
+            const double maximum_feed = m_writer.get_current_speed();
+            double final_feed = maximum_feed;
+            raw_endpoint = section_custom_gcode_endpoint(output,
+                Vec3d(ppi.position[0], ppi.position[1], ppi.position[2]), maximum_feed, final_feed);
+            if (raw_endpoint)
+                output = bounded_feed + output;
+            // Raw commands already contain their feed words; synchronize the
+            // cache without emitting a redundant trailing command.
+            m_writer.set_speed(final_feed);
+        }
         if (const std::vector<double> &pos = ppi.opt_position->values; ppi.position != pos) {
             // Update G-code writer.
             update_position_from_custom_gcode(Vec3d(pos[0], pos[1], pos[2]));
@@ -6496,10 +6537,11 @@ std::string GCode::generate_timelapse_gcode(const Print &print, coordf_t print_z
     if (m_config.print_sequence == PrintSequence::ByObject && printed_objects)
         ctx.printed_objects = *printed_objects;
 
-    auto timelapse_pos = skip_pos_pick ? DefaultTimelapsePos : m_timelapse_pos_picker.pick_pos(ctx);
+    auto timelapse_pos = (skip_pos_pick || m_writer.has_section_transform())
+        ? DefaultTimelapsePos : m_timelapse_pos_picker.pick_pos(ctx);
 
     std::string timelapse_gcode;
-    if (!print.config().time_lapse_gcode.value.empty()) {
+    if (!print.config().time_lapse_gcode.value.empty() && !m_writer.has_section_transform()) {
         DynamicConfig config;
         config.set_key_value("layer_num", new ConfigOptionInt(m_layer_index));
         config.set_key_value("layer_z", new ConfigOptionFloat(print_z));
@@ -6694,6 +6736,7 @@ LayerResult GCode::process_layer(
     // _extrude inline photo, process_layer case gates, template ternary) is inert, so the whole shipping
     // fleet that does not set farthest_point_timelapse is byte-identical to the pre-existing behavior.
     m_farthest_point_timelapse.enabled = m_config.farthest_point_timelapse.value
+        && !m_writer.has_section_transform()
         && m_config.timelapse_type.value == TimelapseType::tlTraditional
         && printer_structure != PrinterStructure::psI3;
     m_farthest_point_timelapse.most_used_extruder = most_used_extruder;
@@ -6720,7 +6763,8 @@ LayerResult GCode::process_layer(
     m_layer = &layer;
     m_object_layer_over_raft = false;
 
-    if (!need_insert_timelapse_gcode_for_traditional && !m_config.time_lapse_gcode.value.empty() && !is_BBL_Printer()) {
+    if (!need_insert_timelapse_gcode_for_traditional && !m_config.time_lapse_gcode.value.empty() &&
+        !is_BBL_Printer() && !m_writer.has_section_transform()) {
         DynamicConfig config;
         config.set_key_value("layer_num", new ConfigOptionInt(m_layer_index));
         config.set_key_value("layer_z", new ConfigOptionFloat(print_z));

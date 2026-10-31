@@ -302,3 +302,50 @@ TEST_CASE("Upright clearance is unchanged by section boundaries near a narrow co
     params.eps = 0.01;
     CHECK(check_hotend_collisions(result, params).has_value() == !clear);
 }
+
+TEST_CASE("Section XY bounds use plate-local positions and reject nonfinite coordinates", "[HotendCollision][Print]")
+{
+    Print print;
+    Model model;
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"printable_area", "0x0,40x0,40x40,0x40"}});
+    Slic3r::Test::init_print({Slic3r::Test::cube(8.)}, print, model, config);
+    print.set_plate_origin(Vec3d(100., 200., 0.));
+    GCodeProcessorResult result;
+    sample_sections(result, true, false);
+    for (auto &move : result.moves)
+        move.position += Vec3f(100.f, 200.f, 0.f);
+    CHECK_NOTHROW(print.validate_nonplanar_gcode(result));
+    result.moves.back().position.x() = 140.1f;
+    CHECK_THROWS_AS(print.validate_nonplanar_gcode(result), SlicingError);
+    result.moves.back().position.x() = std::numeric_limits<float>::infinity();
+    CHECK_THROWS_AS(print.validate_nonplanar_gcode(result), SlicingError);
+    config.set_deserialize_strict("enable_nonplanar", "0");
+    print.apply(model, config);
+    CHECK_NOTHROW(print.validate_nonplanar_gcode(result));
+}
+
+TEST_CASE("Section travel cannot cross the notch of a concave printable area", "[HotendCollision][Print]")
+{
+    Print print;
+    Model model;
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"},
+        {"printable_area", "0x0,40x0,40x10,10x10,10x40,0x40"}});
+    Slic3r::Test::init_print({Slic3r::Test::cube(8.)}, print, model, config);
+    GCodeProcessorResult result;
+    GCodeProcessorResult::MoveVertex start;
+    start.position = Vec3f(5.f, 30.f, 20.f);
+    start.type = EMoveType::Noop;
+    start.cut_segment_id = 0;
+    result.moves.push_back(start);
+    auto end = start;
+    end.position = Vec3f(30.f, 5.f, 20.f);
+    end.type = EMoveType::Travel;
+    result.moves.push_back(end);
+    CHECK_THROWS_AS(print.validate_nonplanar_gcode(result), SlicingError);
+    auto corner = end;
+    corner.position = Vec3f(5.f, 5.f, 20.f);
+    result.moves.insert(result.moves.begin() + 1, corner);
+    CHECK_NOTHROW(print.validate_nonplanar_gcode(result));
+}

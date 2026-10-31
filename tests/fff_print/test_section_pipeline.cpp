@@ -8,6 +8,7 @@
 #include <cmath>
 #include <vector>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_message.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -164,6 +165,7 @@ TEST_CASE("Sliced inherited supports retain contact height and flow in section G
     Model model;
     Slic3r::Test::init_print({mesh}, print, model, config);
     ModelObject *object = model.objects.front();
+    object->instances.front()->set_offset(Vec3d(60., 60., 0.));
     object->cut_planes.enabled = true;
     CutPlane plane;
     plane.point = Vec3d(2., 5., 10.);
@@ -286,16 +288,10 @@ TEST_CASE("Production export preserves section order and world heights for a per
     object->cut_planes.planes.push_back(plane);
     print.apply(model, config);
     print.set_status_silent();
-    // Exercise the existing lower-level exporter in a software fixture. Public
-    // Print processing remains guarded; no application export bypass is added.
-    REQUIRE_THROWS_AS(print.process(), SlicingError);
-    const auto families = section_support_families(print);
-    REQUIRE(families.size() == 1);
-    generate_section_support_family(families.front());
+    REQUIRE_NOTHROW(print.process());
     ScopedTemporaryFile file(".gcode");
     GCodeProcessorResult result;
-    GCode generator;
-    REQUIRE_NOTHROW(generator.do_export(&print, file.string().c_str(), &result));
+    REQUIRE_NOTHROW(print.export_gcode(file.string(), &result));
     REQUIRE(result.nonplanar_metadata_valid);
     size_t root_moves = 0, child_moves = 0;
     bool child_started = false;
@@ -352,7 +348,8 @@ TEST_CASE("Full section slicing exports solid surfaces and infill through uprigh
         {"part_cooling_fan_min_pwm", "0"}, {"slow_down_for_layer_cooling", "0"},
         {"machine_start_gcode", "G90\nM83\nG1 X0 Y0 Z2 F240\n"},
         {"machine_end_gcode", "M400\n"}, {"before_layer_change_gcode", ""},
-        {"layer_change_gcode", "G1 Z{layer_z}\n"}, {"time_lapse_gcode", ""}});
+        {"layer_change_gcode", "G1 Z{layer_z}\n"},
+        {"time_lapse_gcode", "; SECTION_TIMELAPSE_PROBE\nG91\nG1 X100 E1\nG90\n"}});
     Print print;
     Model model;
     TriangleMesh mesh = supports ? make_cube(4., 10., 10.) : Slic3r::Test::cube(20.);
@@ -372,14 +369,16 @@ TEST_CASE("Full section slicing exports solid surfaces and infill through uprigh
     object->cut_planes.planes.push_back(plane);
     print.apply(model, config);
     print.set_status_silent();
-    REQUIRE_THROWS_AS(print.process(), SlicingError);
-    REQUIRE_NOTHROW(Slic3r::Test::PrintPipelineAccess::process(print));
+    const auto validation = print.validate();
+    INFO(validation.string);
+    REQUIRE(validation.string.empty());
+    REQUIRE_NOTHROW(print.process());
     REQUIRE(print.is_step_done(posInfill));
     REQUIRE(print.is_step_done(posSupportMaterial));
+    CHECK_FALSE(print.get_conflict_result().has_value());
     ScopedTemporaryFile file(".gcode");
     GCodeProcessorResult result;
-    GCode generator;
-    REQUIRE_NOTHROW(generator.do_export(&print, file.string().c_str(), &result));
+    REQUIRE_NOTHROW(print.export_gcode(file.string(), &result));
     REQUIRE(result.nonplanar_metadata_valid);
     size_t root_moves = 0, child_moves = 0, infill_moves = 0, support_moves = 0;
     double support_top = 0.;
@@ -417,7 +416,17 @@ TEST_CASE("Full section slicing exports solid surfaces and infill through uprigh
     std::ifstream exported(file.string(), std::ios::binary);
     REQUIRE(exported.is_open());
     const std::string text((std::istreambuf_iterator<char>(exported)), std::istreambuf_iterator<char>());
-    CHECK(text.find("PHYSICAL_BED_OBJECT_START") == std::string::npos);
+    bool bed_macro_emitted = false, timelapse_emitted = false;
+    GCodeReader reader;
+    reader.parse_buffer(text, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
+        // Stored preset text in the configuration footer is not an executed macro.
+        if (line.raw() == "; PHYSICAL_BED_OBJECT_START")
+            bed_macro_emitted = true;
+        if (line.raw() == "; SECTION_TIMELAPSE_PROBE")
+            timelapse_emitted = true;
+    });
+    CHECK_FALSE(bed_macro_emitted);
+    CHECK_FALSE(timelapse_emitted);
     CHECK_NOTHROW(print.validate_nonplanar_gcode(result));
     if (const char *directory = std::getenv("ORCA_TEST_GCODE_ARTIFACT_DIR"); directory && *directory) {
         boost::filesystem::create_directories(directory);
@@ -433,4 +442,94 @@ TEST_CASE("Full section slicing exports solid surfaces and infill through uprigh
         fixture.flush();
         REQUIRE(fixture.good());
     }
+}
+
+TEST_CASE("Overlapping physical copies remain conflicts when each copy has multiple sections", "[Nonplanar][GCode]")
+{
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"print_sequence", "by object"},
+        {"enable_support", "0"}, {"layer_height", "0.2"}, {"initial_layer_print_height", "0.2"},
+        {"sparse_infill_density", "0%"}, {"top_shell_layers", "0"}, {"bottom_shell_layers", "0"},
+        {"top_shell_thickness", "0"}, {"bottom_shell_thickness", "0"},
+        {"skirt_loops", "0"}, {"brim_type", "no_brim"}, {"use_relative_e_distances", "1"},
+        {"machine_start_gcode", "G90\nM83\nG1 X0 Y0 Z2 F240\n"}, {"machine_end_gcode", "M400\n"}});
+    Print print;
+    Model model;
+    Slic3r::Test::init_print({Slic3r::Test::cube(20.)}, print, model, config);
+    ModelObject *object = model.objects.front();
+    object->instances.front()->set_offset(Vec3d(60., 60., 0.));
+    object->add_instance(*object->instances.front())->set_offset(Vec3d(60.5, 60.5, 0.));
+    object->cut_planes.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(10., 10., 10.);
+    object->cut_planes.planes.push_back(plane);
+    print.apply(model, config);
+    print.set_status_silent();
+    REQUIRE(print.objects().size() == 4);
+    REQUIRE_NOTHROW(Slic3r::Test::PrintPipelineAccess::process(print));
+    CHECK(print.get_conflict_result().has_value());
+    ScopedTemporaryFile file(".gcode");
+    GCode generator;
+    REQUIRE_THROWS_AS(generator.do_export(&print, file.string().c_str()), SlicingError);
+    CHECK_FALSE(boost::filesystem::exists(file.path()));
+}
+
+TEST_CASE("Unsupported section combinations report actionable errors and leave ordinary printing available", "[Nonplanar][Print]")
+{
+    const int mode = GENERATE(0, 1, 2, 3, 4, 5, 6);
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"print_sequence", "by object"},
+        {"enable_prime_tower", "0"}, {"skirt_loops", "0"}, {"brim_type", "no_brim"}});
+    Print print;
+    Model model;
+    Slic3r::Test::init_print({Slic3r::Test::cube(20.)}, print, model, config);
+    ModelObject *object = model.objects.front();
+    object->instances.front()->set_offset(Vec3d(60., 60., 0.));
+    object->cut_planes.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(10., 10., 10.);
+    object->cut_planes.planes.push_back(plane);
+    std::string key;
+    switch (mode) {
+    case 0:
+        config.set_deserialize_strict("print_sequence", "by layer");
+        key = "print_sequence";
+        break;
+    case 1:
+        config.set_deserialize_strict({{"skirt_loops", "1"}, {"skirt_height", "1"}});
+        key = "skirt_loops";
+        break;
+    case 2:
+        config.set_deserialize_strict({{"brim_type", "outer_only"}, {"brim_width", "3"}});
+        key = "brim_type";
+        break;
+    case 3:
+        config.set_deserialize_strict("raft_layers", "1");
+        key = "raft_layers";
+        break;
+    case 4:
+        config.set_deserialize_strict("spiral_mode", "1");
+        key = "spiral_mode";
+        break;
+    case 5:
+        config.set_deserialize_strict("nonplanar_hotend_cone_height", "0");
+        key = "nonplanar_hotend_cone_height";
+        break;
+    case 6:
+        object->config.set_key_value("layer_rotation_b", new ConfigOptionFloat(20.));
+        key = "enable_nonplanar";
+        break;
+    }
+    print.apply(model, config);
+    const auto error = print.validate();
+    INFO(error.string);
+    CHECK_FALSE(error.string.empty());
+    CHECK(error.opt_key == key);
+    CHECK_THROWS_AS(print.process(), SlicingError);
+    ScopedTemporaryFile file(".gcode");
+    CHECK_THROWS_AS(print.export_gcode(file.string(), nullptr), SlicingError);
+    CHECK_FALSE(boost::filesystem::exists(file.path()));
+    config.set_deserialize_strict("enable_nonplanar", "0");
+    print.apply(model, config);
+    CHECK_NOTHROW(print.process());
 }

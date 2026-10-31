@@ -136,13 +136,21 @@ jobs:
 
   unlayered-integration-readiness:
     name: Feature wiring check — must pass before a release
+    needs: [windows-x64, windows-x64-tests]
+    if: ${{ always() && !cancelled() }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - name: Verify features are wired to the compiled Windows slicer
         shell: pwsh
+        env:
+          WINDOWS_BUILD_RESULT: ${{ needs.windows-x64.result }}
+          WINDOWS_TEST_RESULT: ${{ needs.windows-x64-tests.result }}
         run: |
           $ErrorActionPreference = 'Stop'
+          if ($env:WINDOWS_BUILD_RESULT -ne 'success' -or $env:WINDOWS_TEST_RESULT -ne 'success') {
+            throw 'Feature readiness requires a successful full Windows build and full unit suite.'
+          }
           $checks = @(
             @{ Label = 'Wave geometry compiled'; File = 'src/libslic3r/CMakeLists.txt'; Pattern = 'WaveOverhangs[/\\]WaveOverhangs\.cpp' },
             @{ Label = 'Wave overhang user setting'; File = 'src/libslic3r/PrintConfig.cpp'; Pattern = 'wave_overhangs' },
@@ -153,7 +161,9 @@ jobs:
             @{ Label = 'Cut-plane slicing orchestration'; File = 'src/libslic3r/PrintApply.cpp'; Pattern = 'derive_cut_segments\(' },
             @{ Label = 'Section G-code frame scope'; File = 'src/libslic3r/GCode.cpp'; Pattern = 'begin_section_frame\(' },
             @{ Label = 'Section frame binding compiled'; File = 'src/libslic3r/CMakeLists.txt'; Pattern = 'GCode[/\\]SectionFrame\.cpp' },
-            @{ Label = 'Collision enforcement at export'; File = 'src/libslic3r/Print.cpp'; Pattern = 'check_hotend_collisions\(' }
+            @{ Label = 'Collision enforcement at export'; File = 'src/libslic3r/Print.cpp'; Pattern = 'check_hotend_collisions\(' },
+            @{ Label = 'Specific section compatibility validation'; File = 'src/libslic3r/Print.cpp'; Pattern = 'nonplanar_compatibility_error\(' },
+            @{ Label = 'Full section pipeline regression'; File = 'tests/fff_print/test_section_pipeline.cpp'; Pattern = 'Full section slicing exports solid surfaces and infill' }
           )
           $missing = 0
           foreach ($c in $checks) {

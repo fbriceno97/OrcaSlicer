@@ -86,6 +86,8 @@
 #include "MaterialType.hpp"
 #include "Model.hpp"
 #include "CutPlanes.hpp"
+#include "HotendEnvelope.hpp"
+#include <stdexcept>
 #include <initializer_list>
 #include "format.hpp"
 #include "LocalesUtils.hpp"
@@ -126,13 +128,16 @@ using namespace nlohmann;
 
 namespace Slic3r {
 
-// Authored sections must never silently fall back to ordinary planar output.
-// Remove this capability guard only when segment slicing, export, preview and
-// collision enforcement are connected and validated together.
-static const ModelObject *unsupported_nonplanar_object(const Print &print)
+// Reject combinations whose section-frame scheduling is not implemented. The
+// supported path still requires machine-space bounds and hotend validation at export.
+static StringObjectException nonplanar_compatibility_error(const Print &print)
 {
     if (!print.config().enable_nonplanar.value)
-        return nullptr;
+        return {};
+    const auto error = [](const PrintObject *object, std::string message, const char *key) {
+        return StringObjectException{std::move(message), object->model_object(), key};
+    };
+    const PrintObject *first_section = nullptr;
     const auto requests_direction = [](const ModelConfig &config) {
         for (const char *key : {"layer_rotation_b", "layer_rotation_c"})
             if (config.has(key)) {
@@ -142,26 +147,70 @@ static const ModelObject *unsupported_nonplanar_object(const Print &print)
             }
         return false;
     };
-    for (const PrintObject *print_object : print.objects()) {
-        const ModelObject *object = print_object->model_object();
-        if (print_object->segment().has_value())
-            return object;
-        if (object->cut_planes.active())
-            for (const CutPlane &plane : object->cut_planes.planes)
-                if (plane.enabled)
-                    return object;
-        if (requests_direction(object->config))
-            return object;
-        for (const ModelVolume *volume : object->volumes)
-            if (volume->is_model_part() && requests_direction(volume->config))
-                return object;
+    for (const PrintObject *object : print.objects()) {
+        if (object->segment()) {
+            if (first_section == nullptr)
+                first_section = object;
+            continue;
+        }
+        const ModelObject *model = object->model_object();
+        const bool active_plane = model->cut_planes.active() && std::any_of(model->cut_planes.planes.begin(),
+            model->cut_planes.planes.end(), [](const CutPlane &plane) { return plane.enabled; });
+        const bool directed_part = std::any_of(model->volumes.begin(), model->volumes.end(), [&](const ModelVolume *volume) {
+            return volume->is_model_part() && requests_direction(volume->config);
+        });
+        if (active_plane || requests_direction(model->config) || directed_part)
+            return error(object, L("The requested non-planar sections could not be derived. Check the cut planes and build directions."), "enable_nonplanar");
     }
-    return nullptr;
-}
-
-static std::string unsupported_nonplanar_message()
-{
-    return L("Active cut planes or build directions are not supported by this experimental build yet. Disable them to slice normally.");
+    if (first_section == nullptr)
+        return {};
+    const PrintConfig &config = print.config();
+    if (config.belt_printer.value)
+        return error(first_section, L("Cut-plane sections require a Cartesian printer with a fixed bed."), "belt_printer");
+    if (config.print_sequence.value != PrintSequence::ByObject)
+        return error(first_section, L("Non-planar sections require By object print sequencing."), "print_sequence");
+    if (print.extruders().size() != 1 || print.has_wipe_tower())
+        return error(first_section, L("Non-planar sections currently require one printing filament and no prime tower."), "enable_prime_tower");
+    if (config.spiral_mode.value)
+        return error(first_section, L("Spiral vase mode is not supported with non-planar sections."), "spiral_mode");
+    if (config.skirt_loops.value > 0 && config.skirt_height.value > 0)
+        return error(first_section, L("Disable the skirt when printing non-planar sections."), "skirt_loops");
+    HotendEnvelope envelope;
+    try {
+        envelope = HotendEnvelope::from_config(config);
+        if (!envelope.enabled())
+            return error(first_section, L("Non-planar sections require an enabled hotend envelope for collision checks."), "nonplanar_hotend_cone_height");
+        for (const PrintObject *object : print.objects()) {
+            if (!object->segment())
+                continue;
+            const CutSegmentDescriptor &section = *object->segment();
+            if (section.is_part())
+                return error(object, L("Independent part build directions are not supported for non-planar export yet. Use cut-plane sections."), "enable_nonplanar");
+            if (section.is_root() && (!section.root_builds_up || std::abs(section.slice_z_base()) > EPSILON))
+                return error(object, L("Non-planar cut-plane printing requires an upright root that starts at the physical bed."), "enable_nonplanar");
+            if (!section.is_root() && !section.touches_base_plane())
+                return error(object, L("A non-planar section must rest on its cut plane. Floating section bases are not supported."), "enable_nonplanar");
+            for (const CutSegmentClip &clip : section.clips)
+                if (clip.role == CutClipRole::Floor &&
+                    clip.normal.normalized().dot(section.build_normal.normalized()) > -1. + 1e-6)
+                    return error(object, L("A section's build direction must be perpendicular to its supporting cut plane."), "enable_nonplanar");
+            if (object->has_raft())
+                return error(object, L("Disable the raft when printing non-planar sections."), "raft_layers");
+            if (object->has_brim())
+                return error(object, L("Disable the brim when printing non-planar sections."), "brim_type");
+            if (object->instances().size() != 1)
+                return error(object, L("A non-planar section requires a distinct physical copy identity."), "enable_nonplanar");
+            const Vec3d axis = object->instances().front().get_slice_to_world_transform().linear().col(2).normalized();
+            const double tilt = Geometry::rad2deg(std::acos(std::clamp(axis.z(), -1., 1.)));
+            const double limit = virtual_tilt_limit_deg(envelope, config.extruder_clearance_height_to_rod.value,
+                section.build_reach_max, std::atan2(axis.y(), axis.x()));
+            if (!axis.allFinite() || axis.z() <= EPSILON || !std::isfinite(tilt) || tilt > limit + EPSILON)
+                return error(object, L("The section exceeds the configured hotend or gantry tilt clearance."), "nonplanar_hotend_cone_height");
+        }
+    } catch (const std::invalid_argument &) {
+        return error(first_section, L("The non-planar hotend or gantry clearance settings are invalid."), "nonplanar_hotend_cone_height");
+    }
+    return {};
 }
 
 Print::SlicingPipelineHookFn Print::s_slicing_pipeline_hook_fn = nullptr;
@@ -1942,8 +1991,8 @@ std::string Print::slicing_errors_message(const SlicingErrors &errors) const
 
 StringObjectException Print::validate(std::vector<StringObjectException> *warnings, Polygons* collison_polygons, std::vector<std::pair<Polygon, float>>* height_polygons) const
 {
-    if (const ModelObject *object = unsupported_nonplanar_object(*this))
-        return {unsupported_nonplanar_message(), object};
+    if (const auto error = nonplanar_compatibility_error(*this); !error.string.empty())
+        return error;
     auto add_warning = [warnings](StringObjectException w) {
         w.is_warning = true;
         if (warnings != nullptr)
@@ -1956,6 +2005,10 @@ StringObjectException Print::validate(std::vector<StringObjectException> *warnin
         w.object  = object;
         add_warning(std::move(w));
     };
+
+    if (m_config.enable_nonplanar.value && !m_config.time_lapse_gcode.value.empty() &&
+        std::any_of(m_objects.begin(), m_objects.end(), [](const PrintObject *object) { return object->segment().has_value(); }))
+        warn(L("Timelapse snapshots are not generated for non-planar sections."), "time_lapse_gcode");
 
     std::vector<unsigned int> extruders = this->extruders();
     unsigned int nozzles = m_config.nozzle_diameter.size();
@@ -3219,8 +3272,8 @@ std::map<ObjectID, unsigned int> getObjectExtruderMap(const Print& print) {
 // Slicing process, running at a background thread.
 void Print::process(long long *time_cost_with_cache, bool use_cache)
 {
-    if (unsupported_nonplanar_object(*this) != nullptr)
-        throw Slic3r::SlicingError(unsupported_nonplanar_message());
+    if (const auto error = nonplanar_compatibility_error(*this); !error.string.empty())
+        throw Slic3r::SlicingError(error.string);
     process_impl(time_cost_with_cache, use_cache);
 }
 
@@ -3987,9 +4040,31 @@ void Print::validate_nonplanar_gcode(const GCodeProcessorResult &result) const
     // checking actual section motion against the printer's vertical limits.
     // Untagged start/end macros may include firmware-managed homing moves;
     // this check covers explicitly generated section extrusion and travel.
-    for (const auto &move : result.moves) {
+    if (m_config.printable_area.values.size() < 3 ||
+        std::any_of(m_config.printable_area.values.begin(), m_config.printable_area.values.end(),
+            [](const Vec2d &point) { return !point.allFinite(); }))
+        throw SlicingError(_u8L("Non-planar section validation requires a finite printable-area polygon."));
+    const Polygon bed = Polygon::new_scale(m_config.printable_area.values);
+    const BoundingBoxf bed_bounds = get_extents(m_config.printable_area.values);
+    const bool convex_bed = polygon_is_convex(bed);
+    const Vec3d plate = get_plate_origin();
+    for (size_t i = 0; i < result.moves.size(); ++i) {
+        const auto &move = result.moves[i];
         if (move.cut_segment_id < 0 || (move.type != EMoveType::Extrude && move.type != EMoveType::Travel && move.type != EMoveType::Wipe))
             continue;
+        const Vec2d xy(double(move.position.x()) - plate.x(), double(move.position.y()) - plate.y());
+        if (!xy.allFinite() || !bed_bounds.contains(xy) || !bed.contains(Point::new_scale(xy.x(), xy.y())))
+            throw SlicingError(_u8L("Non-planar section motion exceeds the printer's XY printable area."));
+        if (!convex_bed && i > 0) {
+            const auto &previous = result.moves[i - 1];
+            const Vec2d start(double(previous.position.x()) - plate.x(), double(previous.position.y()) - plate.y());
+            if (start.allFinite() && bed_bounds.contains(start)) {
+                const Point from = Point::new_scale(start.x(), start.y());
+                const Point to = Point::new_scale(xy.x(), xy.y());
+                if (bed.contains(from) && !diff_pl(Polyline(Points{from, to}), Polygons{bed}).empty())
+                    throw SlicingError(_u8L("Non-planar section motion crosses outside the printer's printable area."));
+            }
+        }
         const double machine_z = double(move.position.z()) + result.z_offset;
         if (!std::isfinite(machine_z) || machine_z < -EPSILON ||
             machine_z > m_config.printable_height.value + EPSILON)
@@ -4008,8 +4083,8 @@ void Print::validate_nonplanar_gcode(const GCodeProcessorResult &result) const
 
 std::string Print::export_gcode(const std::string& path_template, GCodeProcessorResult* result, ThumbnailsGeneratorCallback thumbnail_cb)
 {
-    if (unsupported_nonplanar_object(*this) != nullptr)
-        throw Slic3r::SlicingError(unsupported_nonplanar_message());
+    if (const auto error = nonplanar_compatibility_error(*this); !error.string.empty())
+        throw Slic3r::SlicingError(error.string);
     // output everything to a G-code file
     // The following call may die if the filename_format template substitution fails.
     std::string path = this->output_filepath(path_template);

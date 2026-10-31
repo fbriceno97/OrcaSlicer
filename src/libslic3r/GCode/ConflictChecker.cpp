@@ -260,19 +260,27 @@ ConflictResultOpt ConflictChecker::find_inter_of_lines_in_diff_objs(PrintObjectP
         //}
         conflictQueue.emplace_back_bucket(std::move(wtels), wtdptr.value(), {wtdptr.value()->plate_origin.x(), wtdptr.value()->plate_origin.y()});
     }
+    // A section's local layer zero is not a shared world-Z plane. Sections
+    // partition one physical copy, so retain one identity for that copy here.
+    // Different copies remain distinct; final section clearance is checked in
+    // emitted machine coordinates by the mandatory hotend validator.
+    std::map<const ModelInstance *, const PrintInstance *> section_owners;
     for (PrintObject *obj : objs) {
         auto layers = getAllLayersExtrusionPathsFromObject(obj);
         // Orca: check for collisions between all instances
         const auto& instances = obj->instances();
         for (size_t inst_idx = 0; inst_idx < instances.size(); ++inst_idx) {
             const PrintInstance& inst = instances[inst_idx];
+            const PrintInstance *owner = &inst;
+            if (obj->segment())
+                owner = section_owners.emplace(inst.model_instance, owner).first->second;
             const bool is_last_instance = inst_idx + 1 == instances.size();
             if (is_last_instance) {
-                conflictQueue.emplace_back_bucket(std::move(layers.perimeters), &inst, inst.shift);
-                conflictQueue.emplace_back_bucket(std::move(layers.support), &inst, inst.shift);
+                conflictQueue.emplace_back_bucket(std::move(layers.perimeters), owner, inst.shift);
+                conflictQueue.emplace_back_bucket(std::move(layers.support), owner, inst.shift);
             } else {
-                conflictQueue.emplace_back_bucket(ExtrusionLayers(layers.perimeters), &inst, inst.shift);
-                conflictQueue.emplace_back_bucket(ExtrusionLayers(layers.support), &inst, inst.shift);
+                conflictQueue.emplace_back_bucket(ExtrusionLayers(layers.perimeters), owner, inst.shift);
+                conflictQueue.emplace_back_bucket(ExtrusionLayers(layers.support), owner, inst.shift);
             }
         }
     }

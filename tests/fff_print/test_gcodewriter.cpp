@@ -359,6 +359,7 @@ TEST_CASE("Section raw macros synchronize emitted XYZ after linear arc and relat
         MacroGCode()
         {
             PrintConfig config;
+            config.travel_speed_z.values = {4.};
             m_config.apply(config, true);
             m_writer.apply_print_config(config);
             m_writer.set_extruders({0});
@@ -384,6 +385,11 @@ TEST_CASE("Section raw macros synchronize emitted XYZ after linear arc and relat
     const Vec3d target = !section ? initial : (inches ? Vec3d(25.4, 3., 20.) : Vec3d(20., 22., 25.));
     CHECK_THAT((generator.writer().position_for_custom_gcode() - target).norm(), Catch::Matchers::WithinAbs(0., 1e-6));
     if (section) {
+        GCodeReader reader;
+        reader.parse_buffer(output, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
+            if (line.has(F))
+                CHECK(double(line.f()) * (inches && line.has(X) ? 25.4 : 1.) <= 240.001);
+        });
         const Vec3d logical = generator.writer().get_position();
         CHECK(generator.last_pos() == generator.gcode_to_point(Vec2d(logical.x(), logical.y())));
     }
@@ -392,11 +398,14 @@ TEST_CASE("Section raw macros synchronize emitted XYZ after linear arc and relat
 TEST_CASE("Section raw macros reject unrepresentable coordinate state changes", "[GCodeWriter][Nonplanar]")
 {
     const std::string commands = GENERATE(std::string("G91\nG1 X1\n"), std::string("G20\n"),
-        std::string("G92 Z0\n"), std::string("G28\n"), std::string("G54\n"));
+        std::string("G92 Z0\n"), std::string("G28\n"), std::string("G54\n"),
+        std::string("G1 E1\n"), std::string("G92 E0\n"), std::string("M204 S3000\n"),
+        std::string("M622 J1\nG1 X1\nM623\n"), std::string("M622 J1\n"));
     struct MacroGCode : GCode {
         MacroGCode()
         {
             PrintConfig config;
+            config.travel_speed_z.values = {4.};
             m_config.apply(config, true);
             m_writer.apply_print_config(config);
             m_writer.set_extruders({0});

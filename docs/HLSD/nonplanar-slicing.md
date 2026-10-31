@@ -49,6 +49,12 @@ height before compacting empty planning rows, so an empty model row cannot
 remove a support-only slider height. A tilted layer has varying world Z, and an upper
 section's rebased heights cannot be compared with its physical coordinates.
 
+The preliminary planar path-conflict checker groups sections of the same
+physical ModelInstance under one identity. Their rebased Z schedules cannot be
+compared as world heights, and the partition deliberately shares cut faces.
+Different physical copies retain different identities. Full section clearance
+still runs against emitted machine coordinates before G-code becomes exportable.
+
 A model-space bound `n*x <= d` becomes `n_s*s <= d + n_s*t`, where
 `n_s = inverse(A).transpose()*n`. At each slice height this is an XY half-plane.
 Horizontal bounds either keep or discard the entire slice. Bed bounds include
@@ -96,12 +102,16 @@ pointers are recorded after all seed polygons have been appended. Organic
 inheritance maps contacts using the generator's rounded gap-layer count and
 uniform support grid. Receivers with variable layer-height grids are rejected;
 a shorter final planning row does not change the contact grid. Support below
-floating bases is rejected by the family generator. The section export
-guard remains active.
+floating bases is rejected by the family generator.
 
-Derived sections are rejected by print validation, processing, and export while
-safe section transitions and support propagation remain incomplete. A sequential
-export scope binds the per-copy frame, writes unique section/build-axis metadata,
+Print validation, processing and export enforce the same section compatibility
+rules. Cut-plane sections use an upright root at the physical bed, one printing
+filament, By object sequencing, and no prime tower, skirt, brim, raft or spiral
+vase. Child build directions follow their supporting cut-plane normals.
+Independent part directions, tilted/floating roots and floating child bases are
+rejected with a setting-specific error. The printer's hotend/gantry model also
+limits the allowed build direction. Projects without active derived sections
+retain their ordinary processing path. A sequential export scope binds the per-copy frame, writes unique section/build-axis metadata,
 resets cooling in physical coordinates and closes the frame before global motion.
 Exception cleanup restores the ordinary writer frame. Entering a section marks
 the logical position as uncommanded until the first absolute XYZ move. The writer
@@ -125,8 +135,12 @@ active section, parsed linear/arc XYZ endpoints synchronize the emitted pose,
 including relative moves and temporary inch units. Macros must restore absolute
 XYZ mode and millimeters. Homing and machine-origin/workspace changes reject the
 template rather than leaving a guessed position. Explicit position-variable
-assignments retain their existing authoritative behavior. Startup/global macros,
-conditional firmware moves and raw extrusion state still require integration.
+assignments retain their existing authoritative behavior. Raw XYZ motion receives
+the writer's conservative physical feed cap, including explicit feed commands
+and temporary inch units. Raw extrusion, coordinate resets, motion-limit changes
+and conditional XYZ moves are rejected inside sections. Firmware conditionals
+must be balanced within the macro. Startup/global macros retain their existing
+behavior and remain covered by chronological hotend validation.
 Whole-layer bed settings are
 limited to an upright root whose slice origin is at the physical bed. Per-path
 first-layer settings use the section point's physical bed height; elevated child
@@ -139,13 +153,11 @@ while keeping each local layer's filament-variant configuration. Wave fan
 controls remain available on elevated sections. Legacy last-Z-only macro fallbacks
 are skipped inside sections because full endpoint parsing already tracks relative
 motion and unit changes. Raft and skirt/brim scheduling still need
-production-export integration.
-This scope remains behind
-the export guard; frame binding alone does not establish complete motion safety
-or correct section-layer settings. This includes explicitly directed
-parts with zero rotation: their rebased layer schedules still require section
-emission. The guard prevents a project from silently producing ordinary planar
-G-code for these descriptors.
+production-export integration and are rejected by the compatibility check.
+Timelapse parking is omitted in active sections, including farthest-point camera
+placement, with a validation warning. Ordinary prints retain their timelapse
+behavior. Unsupported directed-part descriptors are rejected rather than falling
+back to ordinary planar output.
 
 Sequential clearance groups sections by their physical model instance. It uses
 the complete compensated model footprint and maximum world Z once per copy,
@@ -158,8 +170,8 @@ Sequential staging tracks the calibrated height of actual deposited moves,
 including positive-extrusion wipes, instead of a section's rebased local maximum.
 The horizontal transfer uses at least 1 mm above this height (or the profile's
 larger Z hop), and rejects a staging height beyond the printer's vertical limit.
-The final collision check remains necessary for ascent/descent and other motion;
-these staging components do not remove the section export guard.
+The final collision check remains mandatory for ascent/descent and other motion;
+a rejected file is removed before it becomes exportable.
 
 Generated section motion uses a conservative scalar feed cap: the smaller positive Z travel
 and machine Z speed limits. Zero Z travel speed uses the machine limit; if both
@@ -175,9 +187,9 @@ collision checks. Print and travel acceleration are bounded by the configured
 machine Z acceleration, rounded downward to the writer's integer command format.
 Zero/inherited acceleration selects that bound inside a section. Sequential
 section entry establishes bounded modal acceleration before any section move;
-missing or sub-unit limits are rejected. Direction-aware feed optimization,
-transition route planning and raw custom macros still require integration before
-section export can be enabled.
+missing or sub-unit limits are rejected. Direction-aware feed optimization is
+not used: all section XYZ motion keeps the conservative scalar cap. Raw section
+macro feed commands receive the same cap.
 
 G-code processing separately retains section IDs and normalized build directions.
 Reloading moves also reloads their direction palette. Annotated section travel
@@ -201,7 +213,9 @@ experimental option disabled retains its existing export path.
 Wipe motion is included in the nozzle sweep, and positive-extrusion wipes add
 material for subsequent moves to avoid.
 
-Annotated section extrusion and travel must stay within physical Z travel limits.
+Annotated section extrusion and travel must stay within physical Z travel limits
+and the plate-local XY printable area. Concave-bed checks also reject a segment
+that crosses outside the bed between two valid endpoints.
 The check restores the calibration removed from preview positions before testing
 the bed and printable-height bounds. Untagged firmware-managed start/end motion
 is outside this section-specific limit check.
