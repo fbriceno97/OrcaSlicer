@@ -35,8 +35,9 @@ restores the copy's XY placement. Scaling, mirroring and shrinkage remain in the
 geometry; the section-to-world map is rigid. Writer input also contains the
 current G-code origin, which must be subtracted before applying this map. Plate
 and nozzle offsets and Z calibration are physical corrections applied afterward.
-While a section transform is active, custom-G-code position variables use the
-emitted machine coordinates, including plate subtraction. Raw custom G-code does
+During a section export, custom-G-code position variables use machine
+coordinates, including plate subtraction, both inside mapped sections and
+between them. Within a mapped section they use the last emitted endpoint. Raw custom G-code does
 not pass through the writer again. Returning a plate-global position here would
 shift a macro move by the plate offset a second time.
 The initial toolpath preview uses the same per-copy inverse slicing map to place
@@ -61,7 +62,10 @@ material back across a cut after the initial mesh clipping.
 Normal and organic support installation clips generated layer polygons and
 contact, overhang and enforcer footprints against the section's bounds over the
 whole support layer-height span before installing support layers. Floors and ceilings both limit this region; only
-floors provide load-bearing heights. The physical world-Z build plate is carried
+floors provide load-bearing heights. Normal and classic-tree overhang detection
+count the floor crossing a layer slab as material supporting that slab. Classic
+tree also excludes floor-supported first-layer strips from sharp-tail seeds.
+Ceilings never suppress overhangs this way. The physical world-Z build plate is carried
 into the section frame even for a tilted root. Ordinary objects leave this
 clipping inactive. A final containment pass applies to all support generators,
 including classic tree: it clips expanded paths at full bead width and height,
