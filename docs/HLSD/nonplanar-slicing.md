@@ -65,6 +65,9 @@ whole support layer-height span before installing support layers. Floors and cei
 floors provide load-bearing heights. Normal and classic-tree overhang detection
 count the floor crossing a layer slab as material supporting that slab. Classic
 tree also excludes floor-supported first-layer strips from sharp-tail seeds.
+Classic-tree descent terminates only when an entire circular or polygon foot
+reaches a load-bearing floor; disk tests include the radius in every XY direction.
+Ceilings and vertical or downward-facing floors cannot terminate descent.
 Ceilings never suppress overhangs this way. The physical world-Z build plate is carried
 into the section frame even for a tilted root. Ordinary objects leave this
 clipping inactive. A final containment pass applies to all support generators,

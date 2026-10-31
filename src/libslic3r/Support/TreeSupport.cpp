@@ -2856,6 +2856,7 @@ void TreeSupport::drop_nodes()
     const coordf_t radius_sample_resolution = m_ts_data->m_radius_sample_resolution;
     const bool support_on_buildplate_only = config.support_on_build_plate_only.value;
     const bool has_belt_floor = std::abs(m_slicing_params.belt_floor_shear_factor) > EPSILON;
+    const SegmentSupportBounds section_floor(*m_object);
     const size_t bottom_interface_layers = number_of_support_interface_bottom_layers(config);
     SupportNode::diameter_angle_scale_factor = diameter_angle_scale_factor;
     float        DO_NOT_MOVER_UNDER_MM       = is_slim ? 0 : 5;                     // do not move contact points under 5mm
@@ -3091,12 +3092,13 @@ void TreeSupport::drop_nodes()
                         node_parent = p_node->parent ? p_node : neighbour;
                     // Make sure the next pass doesn't drop down either of these (since that already happened).
                     node_parent->merged_neighbours.push_front(node_parent == p_node ? neighbour : p_node);
-                    // Belt floor: a merged node ends once its whole circle is in the belt
+                    // Floor: a merged node ends once its whole circle is below a cut face or belt
                     // (its slices are clipped to the belt plane in draw_circles(), so it
                     // tapers to a tip on the belt).  Treat as object-surface termination
                     // (not buildplate) so the node gets floor/interface areas instead of
                     // base pads.
-                    if (has_belt_floor && belt_node_landed(next_position, std::max(node.radius, neighbour->radius), print_z_next)) {
+                    if (section_floor.disk_landed(next_position, std::max(node.radius, neighbour->radius), print_z_next) ||
+                        (has_belt_floor && belt_node_landed(next_position, std::max(node.radius, neighbour->radius), print_z_next))) {
                         std::scoped_lock lock(m_ts_data->m_mutex);
                         node_parent->to_buildplate = false;
                         neighbour->valid = false;
@@ -3180,9 +3182,10 @@ void TreeSupport::drop_nodes()
                     ExPolygons overhangs_next = diff_clipped({ node.overhang }, get_collision(0, obj_layer_nr_next));
                     for(auto& overhang:overhangs_next) {
                         Point        next_pt     = overhang.contour.centroid();
-                        // Belt floor: a polygon node ends once all of it is in the belt.
+                        // Floor: a polygon node ends once all of it is below a cut face or belt.
                         // Treat as object-surface termination (not buildplate).
-                        if (has_belt_floor && belt_polygon_landed(overhang, print_z_next)) {
+                        if (section_floor.polygon_landed(overhang, print_z_next) ||
+                            (has_belt_floor && belt_polygon_landed(overhang, print_z_next))) {
                             p_node->to_buildplate = false;
                             continue;
                         }
@@ -3333,11 +3336,12 @@ void TreeSupport::drop_nodes()
                         if (is_outside) { next_layer_vertex = candidate_vertex; }
                     }
                 }
-                // Belt floor: a node ends once its whole circle is in the belt; until
+                // Floor: a node ends once its whole circle is below a cut face or belt; until
                 // then it keeps dropping and draw_circles() clips each layer's circle
                 // to the belt plane, so the branch tapers to a tip on the belt.
                 // Treat as object-surface termination (not buildplate).
-                if (has_belt_floor && belt_node_landed(next_layer_vertex, node.radius, print_z_next)) {
+                if (section_floor.disk_landed(next_layer_vertex, node.radius, print_z_next) ||
+                    (has_belt_floor && belt_node_landed(next_layer_vertex, node.radius, print_z_next))) {
                     p_node->to_buildplate = false;
                     return; // from parallel_for_each lambda
                 }
@@ -3649,6 +3653,7 @@ void TreeSupport::generate_contact_points()
     coord_t    radius_scaled         = scale_(base_radius);
     bool       on_buildplate_only    = m_object_config->support_on_build_plate_only.value;
     const bool has_belt_floor = std::abs(m_slicing_params.belt_floor_shear_factor) > EPSILON;
+    const SegmentSupportBounds section_floor(*m_object);
 
     //First generate grid points to cover the entire area of the print.
     BoundingBox bounding_box = m_object->bounding_box();
@@ -3737,9 +3742,9 @@ void TreeSupport::generate_contact_points()
 
 
             auto insert_point = [&](Point pt, const ExPolygon& overhang, double radius, bool force_add = false, bool add_interface=true) {
-                // Belt floor: skip contact points whose bottom_z is at or below
-                // the belt floor at this XY position (overhang rests on the belt).
-                if (has_belt_floor && bottom_z <= belt_floor_print_z(pt))
+                // Skip contact points already carried by a load-bearing cut face or belt.
+                if (section_floor.disk_landed(pt, 0., bottom_z) ||
+                    (has_belt_floor && bottom_z <= belt_floor_print_z(pt)))
                     return (SupportNode*) nullptr;
                 Point        hash_pos = pt / ((radius_scaled + 1) / 1);
                 SupportNode* contact_node = nullptr;

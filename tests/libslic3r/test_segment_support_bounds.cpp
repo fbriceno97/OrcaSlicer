@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include "libslic3r/ExtrusionEntity.hpp"
+#include "libslic3r/ExPolygon.hpp"
 #include "libslic3r/ExtrusionEntityCollection.hpp"
 #include "libslic3r/ClipperUtils.hpp"
 #include "libslic3r/Polyline.hpp"
@@ -286,4 +287,41 @@ TEST_CASE("Invalid final support geometry leaves source ownership intact", "[cut
     const SegmentSupportBounds ordinary;
     CHECK_NOTHROW(ordinary.clip_extrusions(source, 1., 0.2));
     CHECK(source.entities.front() == path);
+}
+
+TEST_CASE("Circular tree feet land only when their entire radius reaches a section floor", "[cutplanes][supports]")
+{
+    const SegmentSupportBounds floor(non_root_segment({
+        clip_keeping_above(Vec3d(0.4, 0.3, 1.), 5., CutClipRole::Floor)
+    }), Transform3d::Identity());
+    const Point center = Point::new_scale(0., 0.);
+    // z = 5 - .4*x - .3*y: the minimum over a radius-2 disk is 4,
+    // not the center height 5 or the corner of an axis-aligned square.
+    CHECK(floor.disk_landed(center, 2., 3.999));
+    CHECK_FALSE(floor.disk_landed(center, 2., 4.001));
+    CHECK(floor.disk_landed(center, 0., 4.999));
+    CHECK_FALSE(floor.disk_landed(center, 0., 5.001));
+    CHECK_THROWS_AS(floor.disk_landed(center, -1., 1.), std::invalid_argument);
+    CHECK_THROWS_AS(floor.disk_landed(center, 1., std::numeric_limits<double>::infinity()), std::invalid_argument);
+}
+
+TEST_CASE("Polygon tree feet use all contour vertices and exclude non-load-bearing bounds", "[cutplanes][supports]")
+{
+    ExPolygon footprint;
+    footprint.contour.points = {Point::new_scale(-2., -1.), Point::new_scale(2., -1.),
+        Point::new_scale(2., 1.), Point::new_scale(-2., 1.)};
+    const SegmentSupportBounds floor(non_root_segment({
+        clip_keeping_above(Vec3d(0., 1., 1.), 4., CutClipRole::Floor)
+    }), Transform3d::Identity());
+    CHECK(floor.polygon_landed(footprint, 2.999));
+    CHECK_FALSE(floor.polygon_landed(footprint, 3.001));
+    CHECK_FALSE(floor.polygon_landed(ExPolygon{}, 0.));
+    const CutSegmentClip excluded = GENERATE(
+        clip_keeping_above(Vec3d(0., 0., -1.), -4., CutClipRole::Ceiling),
+        clip_keeping_above(Vec3d(0., 0., -1.), -4., CutClipRole::Floor),
+        clip_keeping_above(Vec3d(1., 0., 0.), 4., CutClipRole::Floor));
+    const SegmentSupportBounds bounds(non_root_segment({excluded}), Transform3d::Identity());
+    CHECK_FALSE(bounds.disk_landed(Point::new_scale(0., 0.), 1., -100.));
+    CHECK_FALSE(bounds.polygon_landed(footprint, -100.));
+    CHECK_THROWS_AS(floor.polygon_landed(footprint, std::numeric_limits<double>::quiet_NaN()), std::invalid_argument);
 }

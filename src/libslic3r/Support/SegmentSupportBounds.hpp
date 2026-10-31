@@ -34,6 +34,7 @@
 namespace Slic3r {
 
 class PrintObject;
+class ExPolygon;
 class ExtrusionEntityCollection;
 
 class SegmentSupportBounds
@@ -85,6 +86,11 @@ public:
     // a segment rests on whichever of its cut faces is uppermost. Returns 0 when no floor covers
     // the point, so callers read "no floor to descend to" rather than an unbounded descent.
     double floor_z(const Point &p) const;
+
+    // Stop descent only when an entire footprint is at/below one load-bearing
+    // floor. Ceilings, vertical planes and downward-facing floors cannot land it.
+    bool disk_landed(const Point &center, double radius, double print_z) const;
+    bool polygon_landed(const ExPolygon &footprint, double print_z) const;
 
     // XY region where a FLOOR passes through the layer slab [z_lo, z_hi]: material there rests on
     // the floor (the belt, or the parent segment's cut face), not on the layer below. Overhang

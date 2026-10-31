@@ -230,6 +230,40 @@ Polygons SegmentSupportBounds::half_plane(const Plane &pl, coordf_t print_z, boo
     return half_plane_at(pl.n, pl.d, print_z, segment_side);
 }
 
+bool SegmentSupportBounds::disk_landed(const Point &center, double radius, double print_z) const
+{
+    if (!m_active)
+        return false;
+    if (!std::isfinite(radius) || radius < 0. || !std::isfinite(print_z))
+        throw std::invalid_argument("Invalid section support landing footprint");
+    const double x = unscale<double>(center.x());
+    const double y = unscale<double>(center.y());
+    for (const Plane &plane : m_planes)
+        if (!plane.ceiling && plane.n.z() >= NORMAL_EPSILON &&
+            plane.n.x() * x + plane.n.y() * y + plane.n.z() * print_z +
+                std::hypot(plane.n.x(), plane.n.y()) * radius <= plane.d)
+            return true;
+    return false;
+}
+
+bool SegmentSupportBounds::polygon_landed(const ExPolygon &footprint, double print_z) const
+{
+    if (!m_active)
+        return false;
+    if (!std::isfinite(print_z))
+        throw std::invalid_argument("Invalid section support landing height");
+    if (footprint.contour.points.empty())
+        return false;
+    for (const Plane &plane : m_planes)
+        if (!plane.ceiling && plane.n.z() >= NORMAL_EPSILON &&
+            std::all_of(footprint.contour.points.begin(), footprint.contour.points.end(), [&](const Point &point) {
+                return plane.n.x() * unscale<double>(point.x()) + plane.n.y() * unscale<double>(point.y()) +
+                    plane.n.z() * print_z <= plane.d;
+            }))
+            return true;
+    return false;
+}
+
 Polygons SegmentSupportBounds::floor_band(coordf_t z_lo, coordf_t z_hi) const
 {
     Polygons band;
