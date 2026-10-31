@@ -76,8 +76,12 @@ safe section transitions and support propagation remain incomplete. A sequential
 export scope binds the per-copy frame, writes unique section/build-axis metadata,
 resets cooling in physical coordinates and closes the frame before global motion.
 Exception cleanup restores the ordinary writer frame. Entering a section marks
-the logical position as uncommanded until the first absolute XYZ move, so layer
-setup cannot trigger a lift through a planned position. This scope remains behind
+the logical position as uncommanded until the first absolute XYZ move. The writer
+retains the last emitted section endpoint independently of planned layer Z.
+Custom-position variables, frame exit and in-place lift checks use that endpoint,
+so planning a layer cannot teleport macro coordinates or trigger a lift through a
+pose the printer has not reached. Layer-height placeholders and raw macro motion
+still require separate section integration. This scope remains behind
 the export guard; frame binding alone does not establish complete motion safety
 or correct section-layer settings. This includes explicitly directed
 parts with zero rotation: their rebased layer schedules still require section

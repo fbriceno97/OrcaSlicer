@@ -56,6 +56,11 @@ bool GCodeWriter::full_gcode_comment = true;
 // lift has to be skipped rather than commanded.
 bool GCodeWriter::must_skip_lift_now() const
 {
+    if (m_section_transform && m_section_emitted_position) {
+        const Vec3d plate(m_x_offset, m_y_offset, 0.);
+        if ((map_section_point(m_pos - plate) - *m_section_emitted_position).norm() > EPSILON)
+            return true;
+    }
     return (m_section_transform.has_value() || m_kinematics->suppress_lift_at_unknown_position()) && ! this->is_current_position_clear();
 }
 
@@ -136,6 +141,8 @@ Vec3d GCodeWriter::position_for_custom_gcode() const
 {
     if (!m_section_transform)
         return m_pos;
+    if (m_section_emitted_position)
+        return *m_section_emitted_position;
     const Vec3d plate(m_x_offset, m_y_offset, 0.);
     // Raw custom G-code bypasses the writer's plate subtraction. Its position
     // variables must match the coordinates actually emitted to the machine.
@@ -153,6 +160,7 @@ void GCodeWriter::set_position_from_custom_gcode(const Vec3d &position)
     const Vec3d plate(m_x_offset, m_y_offset, 0.);
     const Vec3d offset = section_physical_offset();
     m_pos = m_section_transform->inverse() * (position - offset) + offset + plate;
+    m_section_emitted_position = position;
     m_lifted = m_to_lift = 0.;
 }
 
@@ -172,14 +180,27 @@ void GCodeWriter::set_section_transform(const std::optional<Transform3d> &transf
     // Switching frames must not teleport the writer's physical position. Pending
     // logical lifts belong to the old frame and cannot carry into the new one.
     const Vec3d plate(m_x_offset, m_y_offset, 0.);
-    const Vec3d physical = map_section_point(m_pos - plate);
+    const Vec3d physical = m_section_emitted_position ? *m_section_emitted_position : map_section_point(m_pos - plate);
     m_section_transform = transform;
     if (transform) {
         const Vec3d offset = section_physical_offset();
         m_pos = transform->inverse() * (physical - offset) + offset + plate;
     } else
         m_pos = physical + plate;
+    if (transform)
+        m_section_emitted_position = physical;
+    else
+        m_section_emitted_position.reset();
     m_lifted = m_to_lift = 0.;
+}
+
+void GCodeWriter::remember_section_position()
+{
+    if (m_section_transform) {
+        const Vec3d plate(m_x_offset, m_y_offset, 0.);
+        m_section_emitted_position = map_section_point(m_pos - plate);
+        set_current_position_clear(true);
+    }
 }
 
 bool GCodeWriter::supports_separate_travel_acceleration(GCodeFlavor flavor)
@@ -984,6 +1005,7 @@ std::string GCodeWriter::travel_to_xy(const Vec2d &point, const std::string &com
     w.emit_f(speed * 60.0);
     //BBS
     w.emit_comment(GCodeWriter::full_gcode_comment, comment);
+    remember_section_position();
     return w.string();
 }
 
@@ -1183,6 +1205,7 @@ std::string GCodeWriter::travel_to_xyz(const Vec3d &point, const std::string &co
             }
         }
         m_pos = dest_point;
+    remember_section_position();
         this->set_current_position_clear(true);
         return slop_move + xy_z_move;
     }
@@ -1275,6 +1298,7 @@ std::string GCodeWriter::_travel_to_z(double z, const std::string &comment)
     w.emit_f(speed * 60.0);
     //BBS
     w.emit_comment(GCodeWriter::full_gcode_comment, comment);
+    remember_section_position();
     return w.string();
 }
 
@@ -1405,6 +1429,7 @@ void GCodeWriter::extrude_to_xy(std::string &out, const Vec2d &point, double dE,
     //BBS
     w.emit_comment(GCodeWriter::full_gcode_comment, comment);
     w.append_to(out);
+    remember_section_position();
 }
 
 // Approximate an arc with linear extrusions, for machine mappings that cannot
@@ -1529,6 +1554,7 @@ void GCodeWriter::extrude_to_xyz(std::string &out, const Vec3d &point, double dE
     //BBS
     w.emit_comment(GCodeWriter::full_gcode_comment, comment);
     w.append_to(out);
+    remember_section_position();
 }
 
 std::string GCodeWriter::retract(bool before_wipe, double retract_length)

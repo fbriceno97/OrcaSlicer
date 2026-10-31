@@ -281,6 +281,9 @@ TEST_CASE("Section motion leaves physical calibration outside the build-frame ro
     PrintConfig config;
     config.extruder_offset.values = {Vec2d(3., 5.)};
     config.z_offset.value = 0.2;
+    config.z_hop.values = {0.4};
+    config.retract_lift_above.values = {0.};
+    config.retract_lift_below.values = {0.};
     GCodeWriter writer;
     writer.apply_print_config(config);
     writer.set_xy_offset(100., 200.);
@@ -301,11 +304,58 @@ TEST_CASE("Section motion leaves physical calibration outside the build-frame ro
     });
     CHECK_THAT((emitted - expected).norm(), Catch::Matchers::WithinAbs(0., 0.002));
     CHECK_THAT((writer.position_for_custom_gcode() - expected).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    // change_layer() plans Z before any corresponding machine move.
+    writer.get_position().z() += 25.;
+    CHECK_THAT((writer.position_for_custom_gcode() - expected).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    CHECK(writer.eager_lift(LiftType::NormalLift).empty());
+    CHECK(writer.unlift().empty());
     const Vec3d after_macro(120., 230., 80.);
     writer.set_position_from_custom_gcode(after_macro);
     CHECK_THAT((writer.position_for_custom_gcode() - after_macro).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    writer.get_position().z() += 50.;
     writer.set_section_transform(std::nullopt);
     CHECK_THAT((writer.get_position() - after_macro - Vec3d(100., 200., 0.)).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+}
+
+TEST_CASE("Section macro position follows emitted endpoints rather than planned layer Z", "[GCodeWriter][Nonplanar]")
+{
+    const int motion = GENERATE(0, 1, 2, 3, 4, 5);
+    PrintConfig config;
+    config.z_hop.values = {0.4};
+    config.retract_lift_above.values = {0.};
+    config.retract_lift_below.values = {0.};
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    Transform3d frame = Transform3d::Identity();
+    frame.rotate(Eigen::AngleAxisd(Geometry::deg2rad(45.), Vec3d::UnitX()));
+    frame.translation() = Vec3d(10., 20., 30.);
+    writer.set_section_transform(frame);
+    writer.travel_to_xyz(Vec3d(1., 2., 3.));
+    Vec3d endpoint(3., 4., 3.);
+    if (motion == 0) {
+        endpoint.z() = 5.;
+        writer.extrude_to_xyz(endpoint, 1.);
+    } else if (motion == 1)
+        writer.extrude_to_xy(endpoint.head<2>(), 1.);
+    else if (motion == 2)
+        writer.travel_to_xy(endpoint.head<2>());
+    else if (motion == 3) {
+        endpoint = Vec3d(1., 2., 5.);
+        writer.travel_to_z(endpoint.z(), "", true);
+    } else if (motion == 4)
+        writer.extrude_arc_to_xy(endpoint.head<2>(), Vec2d(0., 2.), 1., true);
+    else {
+        endpoint = Vec3d(1., 2., 3.4);
+        REQUIRE_FALSE(writer.eager_lift(LiftType::NormalLift).empty());
+    }
+    const Vec3d expected = frame * endpoint;
+    CHECK_THAT((writer.position_for_custom_gcode() - expected).norm(), Catch::Matchers::WithinAbs(0., 1e-8));
+    writer.get_position().z() += 10.;
+    CHECK_THAT((writer.position_for_custom_gcode() - expected).norm(), Catch::Matchers::WithinAbs(0., 1e-8));
+    writer.set_section_transform(std::nullopt);
+    CHECK_THAT((writer.get_position() - expected).norm(), Catch::Matchers::WithinAbs(0., 1e-8));
 }
 
 TEST_CASE("Tilted arcs emit linear XYZ moves without changing their extrusion amount", "[GCodeWriter][Nonplanar]")
@@ -369,6 +419,7 @@ TEST_CASE("Custom templates exchange machine positions while generated motion st
     frame.translation() = Vec3d(5., 7., 10.);
     generator.writer().set_section_transform(frame);
     generator.writer().set_position_from_custom_gcode(Vec3d(12., 15., 20.));
+    generator.writer().get_position().z() += 10.; // planned layer, no emitted motion
     const std::string output = generator.placeholder_parser_process("machine_end_gcode",
         "G1 X{position[0]} Y{position[1]} Z{position[2]}\n{position[0] = 16}{position[2] = 25}", 0);
     CHECK(output.find("!!!!!") == std::string::npos);

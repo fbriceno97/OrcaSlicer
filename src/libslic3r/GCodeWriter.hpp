@@ -240,6 +240,8 @@ protected:
     std::vector<Vec2d> m_section_tool_offsets;
     double m_section_z_offset {0.};
     double m_section_machine_speed_z {0.};
+    std::optional<Vec3d> m_section_emitted_position;
+    void remember_section_position();
     Vec3d section_physical_offset() const;
     Vec3d map_section_point(const Vec3d &point) const;
 
