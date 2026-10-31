@@ -6,8 +6,19 @@
 #include "libslic3r/Config.hpp"
 #include "libslic3r/GCodeReader.hpp"
 #include "libslic3r/PrintConfig.hpp"
+#include "test_utils.hpp"
+#include <boost/filesystem/operations.hpp>
 
 using namespace Slic3r;
+
+TEST_CASE("Missing G-code files return a read failure instead of terminating the process", "[GCodeReader][Nonplanar]")
+{
+    ScopedTemporaryFile file(".gcode");
+    boost::filesystem::remove(file.string());
+    GCodeReader reader;
+    CHECK_FALSE(reader.parse_file(file.string(), [](GCodeReader &, const GCodeReader::GCodeLine &) {}));
+    CHECK_FALSE(reader.parse_file_raw(file.string(), [](GCodeReader &, const char *, const char *) {}));
+}
 
 namespace {
 

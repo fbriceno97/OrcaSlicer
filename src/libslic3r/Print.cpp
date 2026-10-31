@@ -3895,6 +3895,9 @@ void Print::validate_nonplanar_gcode_file(const std::string &path) const
     if (!m_config.enable_nonplanar.value)
         return;
     GCodeProcessor processor;
+    // Edited files may have lost the embedded configuration block. Initialize
+    // the processor from this print before parsing either annotated or raw XYZ.
+    processor.apply_config(m_config);
     const Vec3d origin = get_plate_origin();
     processor.set_xy_offset(origin.x(), origin.y());
     processor.process_file(path);
