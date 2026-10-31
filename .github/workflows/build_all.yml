@@ -35,11 +35,10 @@ permissions:
   actions: read
 
 concurrency:
-  # A same-repository push and its PR synchronization validate the same branch.
-  # Share the group so they do not build the entire Windows application twice.
-  group: custom-win-x64-${{ github.head_ref || github.ref_name }}
-  # Finish active compilation and tests; retain only the newest pending revision.
-  cancel-in-progress: false
+  # Push and PR synchronization for the same head validate one revision.
+  # Different heads can finish unit tests while the next compiler run starts.
+  group: custom-win-x64-${{ github.head_ref || github.ref_name }}-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: true
 
 jobs:
   windows-script-check:
@@ -69,6 +68,10 @@ jobs:
   windows-x64:
     name: Windows x64 compiler and installer artifact
     needs: windows-script-check
+    # Finish active compilation and retain only the newest queued revision.
+    concurrency:
+      group: custom-win-x64-compile-${{ github.head_ref || github.ref_name }}
+      cancel-in-progress: false
     uses: ./.github/workflows/build_check_cache.yml
     with:
       os: windows-latest
@@ -81,6 +84,9 @@ jobs:
   windows-x64-tests:
     name: Windows x64 unit tests
     needs: windows-x64
+    concurrency:
+      group: custom-win-x64-unit-${{ github.head_ref || github.ref_name }}
+      cancel-in-progress: false
     uses: ./.github/workflows/unit_tests.yml
     with:
       os: windows-latest
