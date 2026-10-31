@@ -92,7 +92,11 @@ export scope binds the per-copy frame, writes unique section/build-axis metadata
 resets cooling in physical coordinates and closes the frame before global motion.
 Exception cleanup restores the ordinary writer frame. Entering a section marks
 the logical position as uncommanded until the first absolute XYZ move. The writer
-retains the last emitted section endpoint independently of planned layer Z.
+retains the last emitted endpoint independently of planned layer Z, including
+global transitions after a complete position has been established. Global
+XY-only commands preserve the emitted Z; Z-only commands preserve emitted XY.
+Arcs update the XY endpoint and positive-extrusion height. Resetting the writer
+configuration clears this transient position.
 Custom-position variables, frame exit and in-place lift checks use that endpoint,
 so planning a layer cannot teleport macro coordinates or trigger a lift through a
 pose the printer has not reached. The `max_layer_z` macro override uses the highest generated positive-extrusion
@@ -118,7 +122,9 @@ Generated section motion uses a conservative scalar feed cap: the smaller positi
 and machine Z speed limits. Zero Z travel speed uses the machine limit; if both
 are unset, generated section motion is rejected. The cap applies to mapped XY, XYZ and Z
 travel, extrusion feed commands and the cached speed used for role-based wipes,
-because each XYZ motion can contain physical Z motion. Section-containing exports
+because each XYZ motion can contain physical Z motion. Global spiral lifts
+apply the same speed cap with and without arc fitting. In-place lifts, including
+spirals, are suppressed when the logical pose differs from the emitted pose. Section-containing exports
 keep these physical limits active through generated global transitions, including
 when no geometric frame is bound. Export cleanup clears the mode; ordinary prints
 retain their existing feed behavior. This deliberately conservative cap does not replace

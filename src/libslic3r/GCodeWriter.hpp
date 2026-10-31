@@ -177,7 +177,11 @@ public:
     // calibration, which remains in machine coordinates after the rotation.
     void set_section_transform(const std::optional<Transform3d> &transform);
     // Keep physical limits active for generated global transitions between frames.
-    void set_section_motion_limits(bool enabled) { m_section_motion_limits = enabled; }
+    void set_section_motion_limits(bool enabled) {
+        m_section_motion_limits = enabled;
+        if (!enabled && !m_section_transform)
+            m_section_emitted_position.reset();
+    }
     bool section_motion_limits_enabled() const { return m_section_motion_limits || m_section_transform.has_value(); }
     double max_deposited_machine_z() const { return m_max_deposited_machine_z; }
     void seed_deposition_height(double height);
@@ -249,7 +253,7 @@ protected:
     double m_section_machine_speed_z {0.};
     double m_section_machine_acceleration_z {0.};
     std::optional<Vec3d> m_section_emitted_position;
-    void remember_section_position();
+    void remember_section_position(bool xy = true, bool z = true);
     double m_max_deposited_machine_z {0.};
     void remember_deposition(double extrusion, bool force_no_extrusion, double start_z);
     Vec3d section_physical_offset() const;

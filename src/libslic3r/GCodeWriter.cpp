@@ -56,7 +56,7 @@ bool GCodeWriter::full_gcode_comment = true;
 // lift has to be skipped rather than commanded.
 bool GCodeWriter::must_skip_lift_now() const
 {
-    if (m_section_transform && m_section_emitted_position) {
+    if (section_motion_limits_enabled() && m_section_emitted_position) {
         const Vec3d plate(m_x_offset, m_y_offset, 0.);
         if ((map_section_point(m_pos - plate) - *m_section_emitted_position).norm() > EPSILON)
             return true;
@@ -150,10 +150,10 @@ Vec3d GCodeWriter::map_section_point(const Vec3d &point) const
 
 Vec3d GCodeWriter::position_for_custom_gcode() const
 {
+    if (section_motion_limits_enabled() && m_section_emitted_position)
+        return *m_section_emitted_position;
     if (!m_section_transform)
         return m_section_motion_limits ? Vec3d(m_pos - Vec3d(m_x_offset, m_y_offset, 0.)) : m_pos;
-    if (m_section_emitted_position)
-        return *m_section_emitted_position;
     const Vec3d plate(m_x_offset, m_y_offset, 0.);
     // Raw custom G-code bypasses the writer's plate subtraction. Its position
     // variables must match the coordinates actually emitted to the machine.
@@ -168,6 +168,10 @@ void GCodeWriter::set_position_from_custom_gcode(const Vec3d &position)
         // Generated global moves still subtract the plate origin. Raw macros
         // already use machine coordinates, including between section frames.
         m_pos = m_section_motion_limits ? Vec3d(position + Vec3d(m_x_offset, m_y_offset, 0.)) : position;
+        if (m_section_motion_limits) {
+            m_section_emitted_position = position;
+            m_lifted = m_to_lift = 0.;
+        }
         return;
     }
     if (!position.allFinite())
@@ -202,19 +206,28 @@ void GCodeWriter::set_section_transform(const std::optional<Transform3d> &transf
         m_pos = transform->inverse() * (physical - offset) + offset + plate;
     } else
         m_pos = physical + plate;
-    if (transform)
+    if (transform || m_section_motion_limits)
         m_section_emitted_position = physical;
     else
         m_section_emitted_position.reset();
     m_lifted = m_to_lift = 0.;
 }
 
-void GCodeWriter::remember_section_position()
+void GCodeWriter::remember_section_position(bool xy, bool z)
 {
-    if (m_section_transform) {
-        const Vec3d plate(m_x_offset, m_y_offset, 0.);
-        m_section_emitted_position = map_section_point(m_pos - plate);
+    if (!section_motion_limits_enabled())
+        return;
+    const Vec3d physical = map_section_point(m_pos - Vec3d(m_x_offset, m_y_offset, 0.));
+    // Mapped moves emit all axes. Global XY-only moves must not copy a planned
+    // layer Z, and Z-only moves must not invent a known XY position.
+    if (m_section_transform || (xy && z)) {
+        m_section_emitted_position = physical;
         set_current_position_clear(true);
+    } else if (m_section_emitted_position) {
+        if (xy)
+            m_section_emitted_position->head<2>() = physical.head<2>();
+        if (z)
+            m_section_emitted_position->z() = physical.z();
     }
 }
 
@@ -246,7 +259,7 @@ bool GCodeWriter::supports_separate_travel_acceleration(GCodeFlavor flavor)
 
 void GCodeWriter::apply_print_config(const PrintConfig &print_config)
 {
-    m_section_motion_limits = false;
+    set_section_motion_limits(false);
     m_max_deposited_machine_z = 0.;
     this->config.apply(print_config, true);
     m_section_tool_offsets = print_config.extruder_offset.values;
@@ -1056,7 +1069,7 @@ std::string GCodeWriter::travel_to_xy(const Vec2d &point, const std::string &com
     w.emit_f(speed * 60.0);
     //BBS
     w.emit_comment(GCodeWriter::full_gcode_comment, comment);
-    remember_section_position();
+    remember_section_position(true, false);
     return w.string();
 }
 
@@ -1099,6 +1112,8 @@ std::string GCodeWriter::lazy_lift(LiftType lift_type, bool spiral_vase)
 // BBS: immediately execute an undelayed lift move with a spiral lift pattern
 // designed specifically for subsequent gcode injection (e.g. timelapse)
 std::string GCodeWriter::eager_lift(const LiftType type) {
+    if (section_motion_limits_enabled() && must_skip_lift_now())
+        return "";
     const LiftType effective_type = (m_force_normal_lift || m_section_transform) ? LiftType::NormalLift : type;
     std::string lift_move;
     double target_lift = 0;
@@ -1350,7 +1365,7 @@ std::string GCodeWriter::_travel_to_z(double z, const std::string &comment)
     w.emit_f(speed * 60.0);
     //BBS
     w.emit_comment(GCodeWriter::full_gcode_comment, comment);
-    remember_section_position();
+    remember_section_position(false, true);
     return w.string();
 }
 
@@ -1371,6 +1386,8 @@ std::string GCodeWriter::_spiral_travel_to_z(double z, const Vec2d &ij_offset, c
         speed = m_is_first_layer ? this->config.get_abs_value_at("initial_layer_travel_speed", m_cached_extruder_idx)
                                  : this->config.travel_speed.get_at(m_cached_extruder_idx);
     }
+
+    speed = section_motion_speed(speed);
 
     if (!this->config.enable_arc_fitting) { // Orca: if arc fitting is disabled, approximate the arc with small linear segments
         const double z_start = m_pos(2); // starting Z height
@@ -1429,6 +1446,7 @@ std::string GCodeWriter::_spiral_travel_to_z(double z, const Vec2d &ij_offset, c
     }
 
     m_pos(2) = z;
+    remember_section_position(false, true);
     return output;
 }
 
@@ -1482,7 +1500,7 @@ void GCodeWriter::extrude_to_xy(std::string &out, const Vec2d &point, double dE,
     //BBS
     w.emit_comment(GCodeWriter::full_gcode_comment, comment);
     w.append_to(out);
-    remember_section_position();
+    remember_section_position(true, false);
     remember_deposition(dE, force_no_extrusion, start_z);
 }
 
@@ -1551,6 +1569,7 @@ void GCodeWriter::extrude_arc_to_xy(std::string &out, const Vec2d& point, const 
         return;
     }
 
+    const double start_z = section_motion_limits_enabled() ? position_for_custom_gcode().z() : 0.;
     m_pos(0) = point(0);
     m_pos(1) = point(1);
     if (!force_no_extrusion)
@@ -1566,6 +1585,8 @@ void GCodeWriter::extrude_arc_to_xy(std::string &out, const Vec2d& point, const 
     //BBS
     w.emit_comment(GCodeWriter::full_gcode_comment, comment);
     w.append_to(out);
+    remember_section_position(true, false);
+    remember_deposition(dE, force_no_extrusion, start_z);
 }
 
 std::string GCodeWriter::extrude_to_xyz(const Vec3d &point, double dE, const std::string &comment, bool force_no_extrusion)
