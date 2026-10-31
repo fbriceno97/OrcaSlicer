@@ -15,6 +15,7 @@
 #include <fstream>
 #include <initializer_list>
 #include <map>
+#include <algorithm>
 #include <string>
 #include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -96,6 +97,18 @@ TEST_CASE("Section and build-axis metadata follow the emitted moves", "[GCodePro
     CHECK(moved.tool_axes == result.tool_axes);
     REQUIRE(moved.moves.size() == result.moves.size());
     CHECK(moved.moves.back().cut_segment_id == -1);
+}
+
+TEST_CASE("Section travel retains physical Z during the custom start stage", "[GCodeProcessor][Nonplanar]")
+{
+    GCodeProcessor processor;
+    process_text(processor, "G90\n;TYPE:Custom\n;SEGMENT_ID:0\nG1 X10 Y10 Z20 F1200\n");
+    REQUIRE(processor.get_result().nonplanar_metadata_valid);
+    float maximum_z = 0.f;
+    for (const auto &move : processor.get_result().moves)
+        if (move.type == EMoveType::Travel)
+            maximum_z = std::max(maximum_z, move.position.z());
+    CHECK_THAT(maximum_z, WithinAbs(20.f, 1e-6f));
 }
 
 TEST_CASE("Reprocessing ordinary G-code clears earlier section metadata", "[GCodeProcessor][Nonplanar]")

@@ -64,8 +64,10 @@ emission. The guard prevents a project from silently producing ordinary planar
 G-code for these descriptors.
 
 G-code processing separately retains section IDs and normalized build directions.
-Reloading moves also reloads their direction palette. With non-planar mode enabled,
-export checks annotated output before renaming its temporary file, and checks
+Reloading moves also reloads their direction palette. Annotated section travel
+retains its physical Z even during a custom start stage,
+so preview preparation-stage flattening cannot hide a clearance move.
+With non-planar mode enabled, export checks annotated output before renaming its temporary file, and checks
 edited G-code before file export or raw-G-code host upload. These checks describe
 a configured hotend model; generic defaults do not establish physical printer
 clearance.

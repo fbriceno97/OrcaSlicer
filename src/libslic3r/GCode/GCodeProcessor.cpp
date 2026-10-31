@@ -7277,7 +7277,9 @@ void GCodeProcessor::store_move_vertex(EMoveType type, EMovePathType path_type, 
     // printers so prepare-stage moves map correctly. Gated on belt_tilt_angle (set
     // from the G-code header before the body is processed) so non-belt processing
     // is byte-identical.
-    const float store_z = (m_processing_start_custom_gcode && m_result.belt_tilt_angle == 0.f)
+    // Annotated section travel must also retain actual Z: preview flattening
+    // would hide clearance moves from both the viewer and collision checks.
+    const float store_z = (m_processing_start_custom_gcode && m_result.belt_tilt_angle == 0.f && m_cut_segment_id < 0)
         ? m_first_layer_height
         : m_end_position[Z] - m_z_offset;
 
