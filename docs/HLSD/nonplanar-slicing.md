@@ -45,6 +45,14 @@ another section retain empty slice slots so modifier parent indices remain valid
 Section processing avoids region bounding-box shortcuts whose coordinates belong
 to the ordinary slicing frame.
 
+Normal and organic support installation clips generated layer polygons and
+contact, overhang and enforcer footprints against the section's bounds before
+installing support layers. Floors and ceilings both limit this region; only
+floors provide load-bearing heights. The physical world-Z build plate is carried
+into the section frame even for a tilted root. Ordinary objects leave this
+clipping inactive. Parent support-demand propagation and the separate classic
+tree-support path still require integration before section export can be enabled.
+
 Derived sections are rejected by print validation, processing, and export while
 machine-space section emission is unavailable. This includes explicitly directed
 parts with zero rotation: their rebased layer schedules still require section

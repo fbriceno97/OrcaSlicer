@@ -4,6 +4,8 @@
 
 #include <cmath>
 #include <limits>
+#include <utility>
+#include <stdexcept>
 
 namespace Slic3r {
 
@@ -17,14 +19,19 @@ SegmentSupportBounds::SegmentSupportBounds(const CutSegmentDescriptor &segment,
                                           double                      bed_clearance,
                                           bool                        root_on_plate)
 {
+    if (!object_to_slice.matrix().allFinite() ||
+        std::abs(object_to_slice.linear().determinant()) < NORMAL_EPSILON ||
+        !std::isfinite(bed_clearance) || bed_clearance < 0.)
+        throw std::invalid_argument("Invalid section support frame or bed clearance");
     // Normals are covectors: they carry through the inverse transpose of the linear part, which
     // stays correct under rotation, non-uniform scale and mirroring. Points carry through the
     // transform itself.
     const Eigen::Matrix3d normal_to_slice = object_to_slice.linear().inverse().transpose();
     for (const CutSegmentClip &clip : segment.clips) {
         const double norm_local_sq = clip.normal.squaredNorm();
-        if (norm_local_sq < NORMAL_EPSILON)
-            continue;
+        if (!clip.normal.allFinite() || !std::isfinite(clip.offset) ||
+            !std::isfinite(norm_local_sq) || norm_local_sq < NORMAL_EPSILON)
+            throw std::invalid_argument("Invalid section support clip");
         // Clip membership is  clip.normal . p - clip.offset <= 0; negating gives the into-segment
         // form this class stores,  n . x >= d.
         Vec3d        n  = normal_to_slice * (- clip.normal);
@@ -43,8 +50,8 @@ SegmentSupportBounds::SegmentSupportBounds(const CutSegmentDescriptor &segment,
 
     if (segment.is_root() && root_on_plate) {
         // The root is the only segment that rests on the build plate; every other one rests on its
-        // parent through its base plane. The root slices along +Z exactly (see
-        // PrintObject::effective_layer_rotation_bc), so its slice frame differs from the instance
+        // parent through its base plane. This descriptor-only form assumes an upright
+        // root, so its slice frame differs from the instance
         // frame by translation alone: XY centering, and -build_z_min in Z, which is what puts the
         // root's own minimum at slice z = 0 -- except that a SUNK root is deliberately NOT rebased,
         // so the material under the plate is never sliced (see CutSegmentDescriptor::slice_z_base).
@@ -60,52 +67,16 @@ SegmentSupportBounds::SegmentSupportBounds(const CutSegmentDescriptor &segment,
 
 SegmentSupportBounds::SegmentSupportBounds(const PrintObject &object, double bed_clearance)
 {
-    // An ordinary object carries no descriptor: stay inactive so every caller keeps stock behavior.
-    if (! object.is_segment()) {
-        // BELT_MOD -- except on a belt printer, where the object is sliced rotated by the belt tilt
-        // and the build surface it rests on is therefore a TILTED plane in its slice frame, exactly
-        // like a non-root segment's cut face. One floor: the belt, raised by bed_clearance. The
-        // plane is the same one the slicer clips layers with (PrintObject::bed_plane_in_slice_frame),
-        // so support can never be grown to a floor the geometry does not agree with. n_bed is a
-        // row of a rotation, hence unit length, so the clearance is a plain offset along it.
-        // UNLAYERED_MOD -- the same for a whole-object layer rotation that tilts the plate in the
-        // slice frame (support_floor_is_tilted() covers both): its support is un-rotated with the
-        // part in the G-code, so the plate, not the slice-frame z = 0, is what must stop it. The
-        // plane is carried into the sheared support-direction frame exactly as the segment branch
-        // below does (the identity unless a lean is active).
-        if (object.support_floor_is_tilted()) {
-            Vec3d  n_bed;
-            double k_bed;
-            object.bed_plane_in_slice_frame(n_bed, k_bed);
-            const Transform3d lean = object.support_lean().shear();
-            const Vec3d       n_s  = lean.linear().inverse().transpose() * n_bed;
-            m_planes.push_back({ n_s, (bed_clearance - k_bed) + n_s.dot(lean.translation()), false });
-            m_active = true;
-        }
+    if (!object.segment())
         return;
-    }
-    const bool belt = object.print()->config().belt_printer.value;
-    // While support is generated in a sheared frame (support direction, see SupportDirection.hpp)
-    // the bounds must be expressed in that frame too: the shear is an affine map, which the
-    // descriptor constructor already handles exactly. The identity when the lean is inactive.
-    const Transform3d lean = object.support_lean().shear();
-    *this = SegmentSupportBounds(*object.segment(), lean * object.object_to_slice(), bed_clearance, /*root_on_plate=*/! belt);
-    if (belt) {
-        // BELT_MOD: the root of a multi-planar belt print rests on the belt, tilted in its frame. A
-        // non-root segment gets the belt too: its own floor is its base plane, and where that plane
-        // runs on below the belt nothing else stopped its support -- a segment tilted off the gantry
-        // grew support columns down to 7 mm under the belt. The belt is the surface all support must
-        // end on, whichever segment. The plane is derived unsheared (n_bed is unit length, so the
-        // clearance is a plain offset), then carried into the sheared frame like every other bound:
-        // n.x >= d under x' = L x + t becomes (L^-T n).x' >= d + (L^-T n).t.
-        Vec3d  n_bed;
-        double k_bed;
-        object.bed_plane_in_slice_frame(n_bed, k_bed);
-        const Vec3d  n_s = lean.linear().inverse().transpose() * n_bed;
-        const double d_s = (bed_clearance - k_bed) + n_s.dot(lean.translation());
-        m_planes.push_back({ n_s, d_s, false });
-        m_active = true;
-    }
+    const Transform3d frame = object.trafo_sliced();
+    *this = SegmentSupportBounds(*object.segment(), frame, bed_clearance, false);
+    // The real build plate is world Z = 0 even when the root builds in a
+    // tilted frame. Do not replace it with the section's local Z = 0 plane.
+    const Transform3d to_world = object.trafo() * frame.inverse();
+    const Vec3d normal = to_world.linear().row(2).transpose();
+    m_planes.push_back({normal, bed_clearance - to_world.translation().z(), false});
+    m_active = true;
 }
 
 Polygons SegmentSupportBounds::valid_region_polygon(coordf_t print_z, const Polygons &column, double overlap) const
@@ -202,6 +173,8 @@ Polygons SegmentSupportBounds::floor_band(coordf_t z_lo, coordf_t z_hi) const
 
 Polygons SegmentSupportBounds::half_plane_at(const Vec3d &n, double d, coordf_t print_z, bool inside_side)
 {
+    if (!n.allFinite() || !std::isfinite(d) || !std::isfinite(print_z))
+        throw std::invalid_argument("Invalid section support half-plane");
     const double  gx    = n.x();
     const double  gy    = n.y();
     const double  gnorm = std::hypot(gx, gy);
@@ -224,12 +197,12 @@ Polygons SegmentSupportBounds::half_plane_at(const Vec3d &n, double d, coordf_t 
     // Boundary line in slice XY: n_x*x + n_y*y = d - n_z*z0. Signed offset along the unit gradient
     // is s; in the frame rotated so the gradient is +X, the segment side is x >= s.
     const double  s_mm = (d - n.z() * double(print_z)) / gnorm;
-    const coord_t s    = scale_(s_mm);
+
 
     // Degenerate: the split line lies outside the bounded box (e.g. a layer far below the plane),
     // so the whole region is on one side. Avoids an inverted rectangle that Clipper would mishandle.
-    if (s >= BIG || s <= -BIG) {
-        const bool segment_full = (s <= -BIG);   // entire box satisfies x >= s
+    if (s_mm >= 1e4 || s_mm <= -1e4) {
+        const bool segment_full = (s_mm <= -1e4);   // entire box satisfies x >= s
         if (segment_full == inside_side) {
             Polygon sq;
             sq.points = { Point(-BIG, -BIG), Point(BIG, -BIG), Point(BIG, BIG), Point(-BIG, BIG) };
@@ -238,6 +211,7 @@ Polygons SegmentSupportBounds::half_plane_at(const Vec3d &n, double d, coordf_t 
         return {};
     }
 
+    const coord_t s = scale_(s_mm);
     const double ang = std::atan2(gy, gx);
     Polygon      poly;
     if (inside_side)

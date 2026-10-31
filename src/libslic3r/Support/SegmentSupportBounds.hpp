@@ -41,7 +41,7 @@ public:
     SegmentSupportBounds() = default;
 
     // Build from a descriptor and the frame that maps object-local coordinates to the coordinates
-    // the segment is actually sliced in (PrintObject::object_to_slice()). bed_clearance raises the
+    // the segment is actually sliced in (PrintObject::trafo_sliced()). bed_clearance raises the
     // build-plate floor by that many mm so support rests a first-layer height ABOVE the bed rather
     // than exactly on it, keeping the un-rotated G-code clear of the machine's minimum Z. Only the
     // bed plane is raised; cut planes (resting on the parent segment) are unaffected.
@@ -52,10 +52,8 @@ public:
                          double                      bed_clearance = 0.,
                          bool                        root_on_plate = true);
 
-    // Same, for a PrintObject that is one segment of a cut-plane partition. For an ordinary object,
-    // which carries no descriptor, it holds only the build plate, and only when the plate is tilted
-    // in the object's slice frame (PrintObject::support_floor_is_tilted(): a belt printer, or a
-    // whole-object layer rotation); otherwise it is inactive -- and so a no-op for every caller.
+    // Same, for a section PrintObject, including the physical world-Z build
+    // plate transformed into its slice frame. Ordinary objects stay inactive.
     explicit SegmentSupportBounds(const PrintObject &object, double bed_clearance = 0.);
 
     bool is_active() const { return m_active; }
@@ -64,7 +62,7 @@ public:
     // (intersection of the half-planes), floors and ceilings alike.
     Polygons valid_region_polygon(coordf_t print_z) const;
     // The same, letting support reach `overlap` past the ceilings -- but only inside `column`, the
-    // support-on-support column at this height (PrintObject::segment_support_column_at). Closes
+    // support-on-support column supplied by the caller at this height. Closes
     // the up-to-one-layer seam whole layers leave under a tilted plane; never under the model.
     Polygons valid_region_polygon(coordf_t print_z, const Polygons &column, double overlap) const;
 

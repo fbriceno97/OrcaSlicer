@@ -19,6 +19,7 @@
 #include <map>
 #include <math.h>
 #include <mutex>
+#include <memory>
 #include <set>
 #include <string>
 #include <string_view>
@@ -32,9 +33,80 @@
 #include "libslic3r/Support/SupportParameters.hpp"
 #include "libslic3r/Config.hpp"
 #include "libslic3r/Print.hpp"
+#include "libslic3r/CutPlanes.hpp"
+#include "libslic3r/Polygon.hpp"
+#include "libslic3r/Point.hpp"
+#include "libslic3r/Support/SupportCommon.hpp"
+#include "libslic3r/Support/SupportLayer.hpp"
+#include "libslic3r/Support/SegmentSupportBounds.hpp"
 
 using namespace Slic3r::Test;
 using namespace Slic3r;
+
+TEST_CASE("Tilted root support bounds retain the physical build plate", "[SupportMaterial][CutPlaneSegmentation]")
+{
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict("enable_nonplanar", "1");
+    Print print;
+    Model model;
+    init_print({cube(20.)}, print, model, config);
+    model.objects.front()->config.set_key_value("layer_rotation_b", new ConfigOptionFloat(25.));
+    print.apply(model, config);
+    REQUIRE(print.objects().size() == 1);
+    const PrintObject &root = *print.objects().front();
+    REQUIRE(root.segment().has_value());
+    const SegmentSupportBounds bounds(root);
+    REQUIRE(bounds.is_active());
+    const Transform3d world_to_slice = root.trafo_sliced() * root.trafo().inverse();
+    for (double x : {-10., 10.})
+        for (double z : {-1., 1.}) {
+            const Vec3d sliced = world_to_slice * Vec3d(x, 0., z);
+            CHECK(contains(bounds.valid_region_polygon(sliced.z()),
+                Point::new_scale(sliced.x(), sliced.y())) == (z > 0.));
+        }
+}
+
+TEST_CASE("Section support installation removes layers and contact footprints beyond its floor and ceiling", "[SupportMaterial][CutPlaneSegmentation]")
+{
+    const bool enabled = GENERATE(false, true);
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict("enable_nonplanar", enabled ? "1" : "0");
+    Print print;
+    Model model;
+    init_print({cube(20.)}, print, model, config);
+    auto &stack = model.objects.front()->cut_planes;
+    stack.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(10., 10., 10.);
+    stack.planes.push_back(plane);
+    print.apply(model, config);
+    PrintObject &root = *print.get_object(0);
+    SupportGeneratorLayerStorage storage;
+    SupportGeneratorLayersPtr layers;
+    const Polygon square({Point::new_scale(-20., -20.), Point::new_scale(20., -20.),
+        Point::new_scale(20., 20.), Point::new_scale(-20., 20.)});
+    for (double z : {-1., 5., 11.}) {
+        SupportGeneratorLayer &layer = storage.allocate_unguarded(SupporLayerType::Base);
+        layer.print_z = z;
+        layer.height = 0.2;
+        layer.bottom_z = z - layer.height;
+        layer.polygons = {square};
+        layer.contact_polygons = std::make_unique<Polygons>(layer.polygons);
+        layer.overhang_polygons = std::make_unique<Polygons>(layer.polygons);
+        layer.enforcer_polygons = std::make_unique<Polygons>(layer.polygons);
+        layers.push_back(&layer);
+    }
+    const SupportGeneratorLayersPtr empty;
+    generate_support_layers(root, empty, empty, empty, layers, empty, empty);
+    REQUIRE(root.support_layers().size() == (enabled ? 1 : 3));
+    for (const SupportGeneratorLayer *layer : layers) {
+        const bool expected_empty = enabled && layer->print_z != 5.;
+        CHECK(layer->polygons.empty() == expected_empty);
+        CHECK(layer->contact_polygons->empty() == expected_empty);
+        CHECK(layer->overhang_polygons->empty() == expected_empty);
+        CHECK(layer->enforcer_polygons->empty() == expected_empty);
+    }
+}
 
 // Distinct layer Z heights carrying support interface extrusion.
 static size_t support_interface_layer_count(const std::string &gcode)

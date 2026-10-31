@@ -6,11 +6,28 @@
 #include "libslic3r/Polygon.hpp"
 #include "libslic3r/Support/SegmentSupportBounds.hpp"
 #include "libslic3r/TriangleMesh.hpp"
+#include "libslic3r/Point.hpp"
+#include "libslic3r/CutPlanes.hpp"
+#include "libslic3r/libslic3r.h"
+#include <Eigen/Geometry>
 
 #include <cmath>
+#include <limits>
+#include <stdexcept>
+#include <utility>
+#include <vector>
 
 using namespace Slic3r;
 using Catch::Matchers::WithinAbs;
+
+TEST_CASE("Support half-planes reject nonfinite inputs and bound remote cuts before scaling", "[cutplanes][supports]")
+{
+    const Vec3d normal(1e-8, 0., 0.);
+    CHECK(SegmentSupportBounds::half_plane_at(normal, 1e100, 1., true).empty());
+    CHECK_FALSE(SegmentSupportBounds::half_plane_at(normal, -1e100, 1., true).empty());
+    CHECK_THROWS_AS(SegmentSupportBounds::half_plane_at(Vec3d::UnitZ(),
+        std::numeric_limits<double>::quiet_NaN(), 1., true), std::invalid_argument);
+}
 
 // A clip is stored as "normal . p - offset <= 0". Authoring them the way support generation reads
 // them -- the half-space keeping  n . p >= d, with n pointing INTO the segment -- keeps the tests
@@ -162,7 +179,7 @@ TEST_CASE("Bounds built from a derived segment agree with its cut planes", "[cut
     CHECK(bounds.valid_region_polygon(9.).empty());   // 8 mm band: 6..14 rebased to 0..8
 }
 
-TEST_CASE("The root's first support layer survives the bed plane raised by its own height", "[SegmentSupportBounds]")
+TEST_CASE("The root's first support layer survives the bed plane raised by its own height", "[SegmentSupportBounds][cutplanes]")
 {
     // The bed plane is raised by bed_clearance so support rests one first-layer height above the
     // plate, and the first support layer is printed at exactly that height. The root's build_z_min

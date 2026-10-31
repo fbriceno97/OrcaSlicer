@@ -30,6 +30,7 @@
 #include "libslic3r/ExtrusionEntity.hpp"
 #include "libslic3r/Polyline.hpp"
 #include "SupportLayer.hpp"
+#include "SegmentSupportBounds.hpp"
 #include "SupportParameters.hpp"
 #include "libslic3r/libslic3r.h"
 #include "libslic3r/Surface.hpp"
@@ -1359,6 +1360,21 @@ SupportGeneratorLayersPtr generate_support_layers(
     // remove dupliated layers
     std::sort(layers_sorted.begin(), layers_sorted.end());
     layers_sorted.erase(std::unique(layers_sorted.begin(), layers_sorted.end()), layers_sorted.end());
+
+    // Clip before installing layers or deriving toolpaths: an entirely excluded
+    // layer must not leave a phantom support layer or interface behind. All
+    // source categories participate, including contact/enforcer footprints.
+    const SegmentSupportBounds section_bounds(object);
+    if (section_bounds.is_active()) {
+        for (SupportGeneratorLayer *layer : layers_sorted) {
+            object.print()->throw_if_canceled();
+            const Polygons valid = section_bounds.valid_region_polygon(layer->print_z);
+            layer->polygons = intersection(layer->polygons, valid);
+            for (const auto *footprint : {&layer->contact_polygons, &layer->overhang_polygons, &layer->enforcer_polygons})
+                if (*footprint)
+                    **footprint = intersection(**footprint, valid);
+        }
+    }
 
     // Sort the layers lexicographically by a raising print_z and a decreasing height.
     std::sort(layers_sorted.begin(), layers_sorted.end(), [](auto *l1, auto *l2) { return *l1 < *l2; });
