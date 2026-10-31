@@ -104,8 +104,7 @@ TEST_CASE("Wave islands keep their own collection when unsupported walls are def
     DynamicPrintConfig config = settings(true);
     config.set_deserialize_strict({{"wall_generator", wall_generator}, {"unsupported_wall_last", "1"}});
     Print print;
-    Model model;
-    Test::init_and_process_print({model_mesh}, print, model, config);
+    Test::init_and_process_print({model_mesh}, print, config);
     CHECK(count_waves(print) > 0);
 }
 
