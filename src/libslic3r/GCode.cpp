@@ -2143,7 +2143,7 @@ void GCode::PlaceholderParserIntegration::init(const GCodeWriter &writer)
 void GCode::update_position_from_custom_gcode(const Vec3d &position)
 {
     m_writer.set_position_from_custom_gcode(position);
-    if (m_writer.has_section_transform()) {
+    if (m_writer.section_motion_limits_enabled()) {
         const Vec3d logical = m_writer.get_position();
         const Point xy = gcode_to_point(Vec2d(logical.x(), logical.y()));
         set_last_pos(Point3(xy, scale_(logical.z() - m_config.z_offset.value)));
@@ -5366,7 +5366,7 @@ PlaceholderParserIntegration &ppi = m_placeholder_parser_integration;
         if (const std::vector<double> &pos = ppi.opt_position->values; ppi.position != pos) {
             // Update G-code writer.
             update_position_from_custom_gcode(Vec3d(pos[0], pos[1], pos[2]));
-            if (!m_writer.has_section_transform())
+            if (!m_writer.section_motion_limits_enabled())
                 this->set_last_pos(this->gcode_to_point({ pos[0], pos[1] }));
         }
 

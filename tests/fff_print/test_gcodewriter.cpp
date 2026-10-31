@@ -573,6 +573,8 @@ TEST_CASE("Custom templates exchange machine positions while generated motion st
     });
     CHECK_THAT((command - Vec3d(12., 15., 20.)).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
     CHECK_THAT((generator.writer().position_for_custom_gcode() - Vec3d(16., 15., 25.)).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    const Vec3d logical = generator.writer().get_position();
+    CHECK(generator.last_pos() == generator.gcode_to_point(Vec2d(logical.x(), logical.y())));
     const Vec3d plate = shifted_plate ? Vec3d(100., 200., 0.) : Vec3d(0., 0., 0.);
     CHECK_THAT((generator.writer().get_position() - frame.inverse() * (Vec3d(16., 15., 25.) + plate)).norm(),
         Catch::Matchers::WithinAbs(0., 1e-9));
