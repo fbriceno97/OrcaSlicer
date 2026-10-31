@@ -46,6 +46,8 @@ jobs:
   windows-script-check:
     name: Windows x64 build script tests
     runs-on: windows-latest
+    outputs:
+      is-current-head: ${{ steps.current-head.outputs.current }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -54,6 +56,25 @@ jobs:
       - name: Run build script test suite
         shell: powershell
         run: .\scripts\test_build_win.ps1
+      - name: Admit only the current experimental branch head
+        id: current-head
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_BRANCH: ${{ github.head_ref || github.ref_name }}
+          BUILD_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $current = 'true'
+          if ($env:BUILD_BRANCH -eq 'feature/unlayered-wave-nonplanar') {
+            $head = gh api "repos/$($env:GITHUB_REPOSITORY)/git/ref/heads/$($env:BUILD_BRANCH)" --jq '.object.sha'
+            if ($LASTEXITCODE -ne 0 -or !$head) { throw 'Cannot determine the current experimental branch head' }
+            if ($head.Trim() -ne $env:BUILD_HEAD) {
+              $current = 'false'
+              Write-Host 'A newer experimental commit superseded this revision; skip heavy builds.'
+            }
+          }
+          "current=$current" >> $env:GITHUB_OUTPUT
 
   windows-x64-clearance-tests:
     name: Windows x64 clearance and section-preview geometry tests
@@ -70,7 +91,7 @@ jobs:
   windows-feature-regressions:
     name: Windows x64 feature regressions
     needs: windows-script-check
-    if: github.repository == 'fbriceno97/OrcaSlicer' && (github.head_ref == 'feature/unlayered-wave-nonplanar' || github.ref_name == 'feature/unlayered-wave-nonplanar')
+    if: needs.windows-script-check.outputs.is-current-head == 'true' && github.repository == 'fbriceno97/OrcaSlicer' && (github.head_ref == 'feature/unlayered-wave-nonplanar' || github.ref_name == 'feature/unlayered-wave-nonplanar')
     concurrency:
       group: custom-win-x64-features-${{ github.head_ref || github.ref_name }}
       cancel-in-progress: true
@@ -87,7 +108,7 @@ jobs:
   windows-x64:
     name: Windows x64 compiler and installer artifact
     needs: [windows-script-check, windows-feature-regressions]
-    if: ${{ !cancelled() && needs.windows-script-check.result == 'success' && (needs.windows-feature-regressions.result == 'success' || needs.windows-feature-regressions.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.windows-script-check.result == 'success' && needs.windows-script-check.outputs.is-current-head == 'true' && (needs.windows-feature-regressions.result == 'success' || needs.windows-feature-regressions.result == 'skipped') }}
     # Finish active compilation and retain only the newest queued revision.
     concurrency:
       group: custom-win-x64-compile-${{ github.head_ref || github.ref_name }}
