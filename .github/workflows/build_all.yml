@@ -67,9 +67,27 @@ jobs:
       - name: Run clearance regression tests
         run: ctest --test-dir build/hotend-envelope -C Release --no-tests=error --output-on-failure --output-junit hotend-results.xml
 
+  windows-feature-regressions:
+    name: Windows x64 feature regressions
+    needs: windows-script-check
+    if: github.repository == 'fbriceno97/OrcaSlicer' && (github.head_ref == 'feature/unlayered-wave-nonplanar' || github.ref_name == 'feature/unlayered-wave-nonplanar')
+    concurrency:
+      group: custom-win-x64-features-${{ github.head_ref || github.ref_name }}
+      cancel-in-progress: true
+    uses: ./.github/workflows/build_check_cache.yml
+    with:
+      os: windows-latest
+      arch: x64
+      compiler: clang
+      build-deps-only: false
+      feature-tests-only: true
+      force-build: false
+    secrets: inherit
+
   windows-x64:
     name: Windows x64 compiler and installer artifact
-    needs: windows-script-check
+    needs: [windows-script-check, windows-feature-regressions]
+    if: ${{ !cancelled() && needs.windows-script-check.result == 'success' && (needs.windows-feature-regressions.result == 'success' || needs.windows-feature-regressions.result == 'skipped') }}
     # Finish active compilation and retain only the newest queued revision.
     concurrency:
       group: custom-win-x64-compile-${{ github.head_ref || github.ref_name }}

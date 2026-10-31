@@ -13,6 +13,10 @@ on:
         required: false
         type: string
         default: msvc
+      feature-tests-only:
+        required: false
+        type: boolean
+        default: false
       build-deps-only:
         required: false
         type: boolean
@@ -193,6 +197,7 @@ jobs:
       os: ${{ inputs.os }}
       arch: ${{ inputs.arch }}
       compiler: ${{ inputs.compiler }}
+      feature-tests-only: ${{ inputs.feature-tests-only }}
       build-deps-only: ${{ inputs.build-deps-only }}
       force-build: ${{ inputs.force-build }}
     secrets: inherit
