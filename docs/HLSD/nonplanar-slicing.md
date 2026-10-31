@@ -39,6 +39,9 @@ While a section transform is active, custom-G-code position variables use the
 emitted machine coordinates, including plate subtraction. Raw custom G-code does
 not pass through the writer again. Returning a plate-global position here would
 shift a macro move by the plate offset a second time.
+The initial toolpath preview uses the same per-copy inverse slicing map to place
+section perimeter, infill and support vertices back in world geometry. Machine
+calibration is excluded from this model-space view.
 
 A model-space bound `n*x <= d` becomes `n_s*s <= d + n_s*t`, where
 `n_s = inverse(A).transpose()*n`. At each slice height this is an XY half-plane.

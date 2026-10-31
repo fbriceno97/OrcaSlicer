@@ -760,6 +760,7 @@ static void convert_object_to_vertices(const Slic3r::PrintObject& object, const 
         assert(it != data.layers_zs.end());
         const size_t layer_id = (it != data.layers_zs.end()) ? std::distance(data.layers_zs.begin(), it) : 0;
         for (const Slic3r::PrintInstance& instance : object.instances()) {
+            const size_t instance_vertices_begin = data.vertices.size();
             const Slic3r::Point& copy = instance.shift;
             for (const Slic3r::LayerRegion* layerm : layer->regions()) {
                 if (layerm->slices.empty())
@@ -791,10 +792,8 @@ static void convert_object_to_vertices(const Slic3r::PrintObject& object, const 
                     }
                 }
             }
-            if (has_support) {
-                const Slic3r::SupportLayer* support_layer = dynamic_cast<const Slic3r::SupportLayer*>(layer);
-                if (support_layer == nullptr)
-                    continue;
+            if (const auto *support_layer = dynamic_cast<const Slic3r::SupportLayer*>(layer);
+                has_support && support_layer != nullptr) {
                 const Slic3r::PrintObjectConfig& cfg = support_layer->object()->config();
                 for (const Slic3r::ExtrusionEntity* extrusion_entity : support_layer->support_fills.entities) {
                     const bool is_support_material = extrusion_entity->role() == Slic3r::ExtrusionRole::erSupportMaterial;
@@ -805,6 +804,18 @@ static void convert_object_to_vertices(const Slic3r::PrintObject& object, const 
                                         extruder_id, object_helper.color_id(layer_z, extruder_id),
                                         is_support_material ? EGCodeExtrusionRole::SupportMaterial : EGCodeExtrusionRole::SupportMaterialInterface,
                                         copy, data.vertices);
+                }
+            }
+            if (object.segment()) {
+                // The conversion above adds the copy's XY shift to slice-frame
+                // vertices. Undo that shift before restoring world geometry,
+                // including this section's tilt and rebased Z. Preview is in
+                // world coordinates, without machine/nozzle calibration.
+                const Slic3r::Vec3d shift(Slic3r::unscale<double>(copy.x()), Slic3r::unscale<double>(copy.y()), 0.);
+                const Slic3r::Transform3d to_world = instance.get_slice_to_world_transform() * Eigen::Translation3d(-shift);
+                for (size_t index = instance_vertices_begin; index < data.vertices.size(); ++index) {
+                    const Slic3r::Vec3f sliced = convert(data.vertices[index].position);
+                    data.vertices[index].position = convert(Slic3r::Vec3f((to_world * sliced.cast<double>()).cast<float>()));
                 }
             }
         }
