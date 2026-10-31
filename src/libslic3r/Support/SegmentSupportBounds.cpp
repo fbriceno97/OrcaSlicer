@@ -151,7 +151,9 @@ double SegmentSupportBounds::floor_z(const Point &p) const
     const double x     = unscale<double>(p.x());
     const double y     = unscale<double>(p.y());
     for (const Plane &pl : m_planes)
-        if (! pl.ceiling && std::abs(pl.n.z()) >= NORMAL_EPSILON) {
+        // Only a lower bound can stop a descending branch. Independent build
+        // directions can turn an authored floor into an upper bound here.
+        if (! pl.ceiling && pl.n.z() >= NORMAL_EPSILON) {
             z     = std::max(z, (pl.d - pl.n.x() * x - pl.n.y() * y) / pl.n.z());
             found = true;
         }
