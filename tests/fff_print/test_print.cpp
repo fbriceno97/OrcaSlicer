@@ -2138,7 +2138,7 @@ TEST_CASE("Sequential section clearance uses compensated whole-copy height above
     plane.point = Vec3d(10., 10., 10.);
     object->cut_planes.planes.push_back(plane);
     print.apply(model, config);
-    std::vector<std::pair<Polygon, float>> heights;
+    std::vector<std::pair<Slic3r::Polygon, float>> heights;
     const auto result = Print::sequential_print_clearance_valid(print, nullptr, &heights);
     // 20 / .95 exceeds the configured 20.5-mm rod clearance even though
     // each section's own rebased height is only about 10.5 mm.
