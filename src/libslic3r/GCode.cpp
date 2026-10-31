@@ -4667,11 +4667,17 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
                     // another one, set first layer temperatures. This happens before the Z move
                     // is triggered, so machine has more time to reach such temperatures.
                     this->placeholder_parser().set("current_object_idx", int(finished_objects));
-                    std::string printing_by_object_gcode = this->placeholder_parser_process("printing_by_object_gcode", print.config().printing_by_object_gcode.value, initial_extruder_id);
-                    // Set first layer bed and extruder temperatures, don't wait for it to reach the temperature.
-                    this->_print_first_layer_bed_temperature(file, print, printing_by_object_gcode, initial_extruder_id, false);
-                    this->_print_first_layer_extruder_temperatures(file, print, printing_by_object_gcode, initial_extruder_id, false);
-                    file.writeln(printing_by_object_gcode);
+                    const auto &section = object.segment();
+                    const bool starts_at_bed = !section || (section->is_root() && section->root_builds_up &&
+                        std::abs(section->slice_z_base()) < EPSILON);
+                    if (starts_at_bed) {
+                        const std::string printing_by_object_gcode = this->placeholder_parser_process(
+                            "printing_by_object_gcode", print.config().printing_by_object_gcode.value, initial_extruder_id);
+                        // A new physical bed object starts its adhesion settings.
+                        this->_print_first_layer_bed_temperature(file, print, printing_by_object_gcode, initial_extruder_id, false);
+                        this->_print_first_layer_extruder_temperatures(file, print, printing_by_object_gcode, initial_extruder_id, false);
+                        file.writeln(printing_by_object_gcode);
+                    }
                 }
                 // Reset the cooling buffer internal state (the current position, feed rate, accelerations).
                 // Print's export guard remains until section transitions, layer
@@ -4683,6 +4689,10 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
                 });
                 file.write(begin_section_frame(**print_object_instance_sequential_active, m_origin, m_writer));
                 if (section_frame) {
+                    // These caches describe the local schedule, not the height
+                    // reached by the preceding section in machine coordinates.
+                    m_last_layer_z = 0.f;
+                    m_last_height = 0.f;
                     // Establish bounded modal acceleration before the first move,
                     // even when the process requests inherited/default settings.
                     file.write(m_writer.set_print_acceleration(std::numeric_limits<unsigned int>::max()));
@@ -6608,7 +6618,10 @@ LayerResult GCode::process_layer(
     //BBS: using layer id to judge whether the layer is first layer is wrong. Because if the normal
     //support is attached above the object, and support layers has independent layer height, then the lowest support
     //interface layer id is 0.
-    bool                 first_layer   = (layer.id() == 0 && abs(layer.bottom_z()) < EPSILON);
+    const bool first_local_layer = layer.id() == 0 && std::abs(layer.bottom_z()) < EPSILON;
+    const auto &section = layer.object()->segment();
+    const bool first_layer = first_local_layer && (!section ||
+        (section->is_root() && section->root_builds_up && std::abs(section->slice_z_base()) < EPSILON));
     m_writer.set_is_first_layer(first_layer);
     unsigned int         first_extruder_id = layer_tools.extruders.front();
 
@@ -6644,7 +6657,10 @@ LayerResult GCode::process_layer(
     sprintf(buf, print.is_BBL_printer() ? "; Z_HEIGHT: %g\n" : ";Z:%g\n", print_z);
     gcode += buf;
     // export layer height
-    float height = first_layer ? static_cast<float>(print_z) : static_cast<float>(print_z) - m_last_layer_z;
+    // Layer thickness restarts in each local schedule even when the section
+    // starts above the bed and must retain ordinary printing settings.
+    float height = section ? static_cast<float>(layer.height) :
+        (first_local_layer ? static_cast<float>(print_z) : static_cast<float>(print_z) - m_last_layer_z);
     sprintf(buf, ";%s%g\n", GCodeProcessor::reserved_tag(GCodeProcessor::ETags::Height).c_str(), height);
     gcode += buf;
     // update caches

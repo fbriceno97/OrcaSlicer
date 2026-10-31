@@ -37,6 +37,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <ios>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <utility>
@@ -336,6 +337,8 @@ TEST_CASE("Full section slicing exports solid surfaces and infill through uprigh
         {"top_shell_thickness", "0"}, {"bottom_shell_thickness", "0"},
         {"wall_loops", "2"}, {"skirt_loops", "0"}, {"brim_type", "no_brim"},
         {"use_relative_e_distances", "1"}, {"travel_speed_z", "4"},
+        {"nozzle_temperature_initial_layer", "220"}, {"nozzle_temperature", "205"},
+        {"printing_by_object_gcode", "; PHYSICAL_BED_OBJECT_START\n"},
         {"machine_start_gcode", "G90\nM83\nG1 X0 Y0 Z2 F240\n"},
         {"machine_end_gcode", "M400\n"}, {"before_layer_change_gcode", ""},
         {"layer_change_gcode", "G1 Z{layer_z}\n"}, {"time_lapse_gcode", ""}});
@@ -374,6 +377,8 @@ TEST_CASE("Full section slicing exports solid surfaces and infill through uprigh
             REQUIRE(move.tool_axis_id < result.tool_axes.size());
             CHECK_THAT((result.tool_axes[move.tool_axis_id].cast<double>() - plane.normal).norm(),
                 Catch::Matchers::WithinAbs(0., 1e-5));
+            CHECK_THAT(move.temperature, Catch::Matchers::WithinAbs(205., 0.01));
+            CHECK(move.height > 0.f);
             ++child_moves;
         }
         if (is_infill(move.extrusion_role))
@@ -382,6 +387,10 @@ TEST_CASE("Full section slicing exports solid surfaces and infill through uprigh
     CHECK(root_moves > 0);
     CHECK(child_moves > 0);
     CHECK(infill_moves > 0);
+    std::ifstream exported(file.string(), std::ios::binary);
+    REQUIRE(exported.is_open());
+    const std::string text((std::istreambuf_iterator<char>(exported)), std::istreambuf_iterator<char>());
+    CHECK(text.find("PHYSICAL_BED_OBJECT_START") == std::string::npos);
     CHECK_NOTHROW(print.validate_nonplanar_gcode(result));
     if (const char *directory = std::getenv("ORCA_TEST_GCODE_ARTIFACT_DIR"); directory && *directory) {
         boost::filesystem::create_directories(directory);
