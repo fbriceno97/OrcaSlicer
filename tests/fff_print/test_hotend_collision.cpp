@@ -92,6 +92,16 @@ TEST_CASE("Travel is not rejected for material deposited later in the same secti
     CHECK_FALSE(check_hotend_collisions(result, HotendCollisionParams{}).has_value());
 }
 
+TEST_CASE("Removing section comments cannot bypass upright hotend clearance checks", "[HotendCollision]")
+{
+    const bool clear = GENERATE(false, true);
+    GCodeProcessorResult result;
+    sample_sections(result, clear, false);
+    for (auto &move : result.moves)
+        move.cut_segment_id = -1;
+    CHECK(check_hotend_collisions(result, HotendCollisionParams{}).has_value() == !clear);
+}
+
 TEST_CASE("Long clearance checks propagate cancellation", "[HotendCollision]")
 {
     GCodeProcessorResult result;
@@ -182,6 +192,33 @@ TEST_CASE("Edited G-code must remain readable and retain valid section metadata"
     CHECK_THROWS_AS(print.validate_nonplanar_gcode_file(edited.string()), SlicingError);
     boost::filesystem::remove(edited.string());
     CHECK_THROWS(print.validate_nonplanar_gcode_file(edited.string()));
+    config.set_deserialize_strict({{"enable_nonplanar", "0"}});
+    print.apply(model, config);
+    CHECK_NOTHROW(print.validate_nonplanar_gcode_file(edited.string()));
+}
+
+TEST_CASE("Edited XYZ motion is collision checked without section comments", "[HotendCollision][Print]")
+{
+    const bool clear = GENERATE(false, true);
+    Print print;
+    Model model;
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}});
+    Slic3r::Test::init_print({Slic3r::Test::cube(8.)}, print, model, config);
+    ScopedTemporaryFile edited(".gcode");
+    {
+        std::ofstream out(edited.string());
+        REQUIRE(out.is_open());
+        out << "G90\nM83\nG1 X0 Y0 Z10 F600\nG1 X10 Y0 Z10 E1\n";
+        if (clear)
+            out << "G1 Z30\nG1 X30\nG1 Z0\n";
+        else
+            out << "G1 X0 Z0\n";
+    }
+    if (clear)
+        CHECK_NOTHROW(print.validate_nonplanar_gcode_file(edited.string()));
+    else
+        CHECK_THROWS_AS(print.validate_nonplanar_gcode_file(edited.string()), SlicingError);
     config.set_deserialize_strict({{"enable_nonplanar", "0"}});
     print.apply(model, config);
     CHECK_NOTHROW(print.validate_nonplanar_gcode_file(edited.string()));

@@ -3907,11 +3907,6 @@ void Print::validate_nonplanar_gcode(const GCodeProcessorResult &result) const
         return;
     if (!result.nonplanar_metadata_valid)
         throw SlicingError(_u8L("Non-planar G-code contains invalid section or build-direction metadata."));
-    const bool has_sections = std::any_of(result.moves.begin(), result.moves.end(), [](const auto &move) {
-        return move.cut_segment_id >= 0;
-    });
-    if (!has_sections && result.tool_axes.size() <= 1)
-        return;
     HotendCollisionParams params;
     params.throw_on_cancel = [this]() { throw_if_canceled(); };
     params.envelope = HotendEnvelope::from_config(m_config);

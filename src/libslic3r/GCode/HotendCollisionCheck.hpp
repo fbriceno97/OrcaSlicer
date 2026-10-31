@@ -25,8 +25,8 @@ namespace Slic3r {
 // orientation change. The pyramid's faces turn with the head: tool_head_frame() gives the head's
 // real orientation for that axis on a 5-axis machine. On a virtual 5-axis (3-axis) printer the
 // nozzle never tilts, so `upright` holds the pyramid vertical with its faces along machine X/Y
-// whatever axis the chunk was tagged with. Ordinary planar output without section markers is
-// skipped; sections with matching build axes still have their transitions checked.
+// whatever axis the chunk was tagged with. Section markers partition episodes;
+// unannotated motion is still checked when the caller enables validation.
 // Upright nozzles also check earlier deposition within the same episode in motion order.
 struct HotendCollisionParams
 {

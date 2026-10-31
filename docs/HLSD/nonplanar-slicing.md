@@ -57,3 +57,8 @@ export checks annotated output before renaming its temporary file, and checks
 edited G-code before file export or raw-G-code host upload. These checks describe
 a configured hotend model; generic defaults do not establish physical printer
 clearance.
+
+With non-planar validation enabled, unannotated XYZ motion also receives the
+chronological upright-nozzle check. Removing section comments during
+post-processing cannot turn off clearance validation. Ordinary printing with the
+experimental option disabled retains its existing export path.

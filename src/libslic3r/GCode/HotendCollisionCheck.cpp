@@ -129,10 +129,10 @@ std::optional<ConflictResult> check_hotend_collisions(const GCodeProcessorResult
     const double coordinate_limit = double(INT32_MAX) / 20.;
     if (env.height > coordinate_limit || params.margin > coordinate_limit)
         throw std::invalid_argument("Hotend model exceeds collision coordinate limits");
-    const bool has_sections = std::any_of(result.moves.begin(), result.moves.end(), [](const auto &move) {
-        return move.cut_segment_id >= 0;
-    });
-    if ((result.tool_axes.size() <= 1 && !has_sections) || result.moves.size() < 2)
+    // Upright-nozzle geometry does not depend on section comments. A
+    // postprocessor may strip those comments without changing a dangerous
+    // move, so absence of annotations must not disable the ordered check.
+    if (result.moves.size() < 2)
         return std::nullopt;
 
     // --- split the move stream into tool-axis episodes and sample tips / material ---
