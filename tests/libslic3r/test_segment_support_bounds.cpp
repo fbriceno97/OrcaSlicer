@@ -247,6 +247,7 @@ TEST_CASE("Final support containment clips expanded paths and nested islands at 
     bounds.clip_extrusions(source, 1., 0.2);
     REQUIRE_FALSE(source.empty());
     CHECK(source.no_sort);
+    CHECK_FALSE(source.can_reverse());
     CHECK(source.min_mm3_per_mm() == 0.4);
     CHECK(source.role() == erSupportMaterialInterface);
     const Polylines lines = source.as_polylines();

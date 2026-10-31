@@ -120,8 +120,9 @@ void SegmentSupportBounds::clip_extrusions(ExtrusionEntityCollection &extrusions
         auto output = std::make_unique<ExtrusionEntityCollection>();
         output->no_sort = true;
         if (const auto *collection = dynamic_cast<const ExtrusionEntityCollection *>(&entity)) {
-            *output = *collection;
-            output->clear();
+            output->no_sort = collection->no_sort;
+            if (!collection->can_reverse())
+                output->set_reverse();
             for (const ExtrusionEntity *child : collection->entities) {
                 auto clipped = clip_entity(*child);
                 if (!clipped->empty())
