@@ -24,6 +24,7 @@
 #include "Geometry.hpp"
 #include "Line.hpp"
 #include <algorithm>
+#include <memory>
 #include <cmath>
 #include <cassert>
 #include <cstddef>
@@ -1329,7 +1330,7 @@ std::tuple<std::vector<ExtrusionPaths>, Polygons> generate_extra_perimeters_over
     return {extra_perims, diff(inset_overhang_area, inset_overhang_area_left_unfilled)};
 }
 
-void PerimeterGenerator::apply_extra_perimeters(ExPolygons &infill_area)
+void PerimeterGenerator::apply_extra_perimeters(ExPolygons &infill_area, ExtrusionEntityCollection *island_perimeters)
 {
     const bool use_waves = this->config->wave_overhangs.value;
     if (!m_spiral_vase && this->lower_slices != nullptr && this->config->detect_overhang_wall && (this->config->extra_perimeters_on_overhangs || use_waves) &&
@@ -1360,14 +1361,18 @@ void PerimeterGenerator::apply_extra_perimeters(ExPolygons &infill_area)
             return {std::move(result.paths), std::move(result.residual)};
         }();
         if (!extra_perimeters.empty()) {
-            ExtrusionEntityCollection *this_islands_perimeters = static_cast<ExtrusionEntityCollection *>(this->loops->entities.back());
+            if (island_perimeters == nullptr) {
+                auto collection = std::make_unique<ExtrusionEntityCollection>();
+                this->loops->entities.push_back(collection.get());
+                island_perimeters = collection.release();
+            }
             ExtrusionEntityCollection  new_perimeters{};
-            new_perimeters.no_sort = this_islands_perimeters->no_sort;
+            new_perimeters.no_sort = island_perimeters->no_sort;
             for (const ExtrusionPaths &paths : extra_perimeters) {
                 new_perimeters.append(paths);
             }
-            new_perimeters.append(this_islands_perimeters->entities);
-            this_islands_perimeters->swap(new_perimeters);
+            new_perimeters.append(island_perimeters->entities);
+            island_perimeters->swap(new_perimeters);
 
             SurfaceCollection orig_surfaces = *this->fill_surfaces;
             this->fill_surfaces->clear();
@@ -1560,6 +1565,7 @@ void PerimeterGenerator::process_classic()
     const bool only_one_wall_top         = this->config->only_one_wall_top && has_top_shell_layers(*this->config);
     const bool only_one_wall_first_layer = this->config->only_one_wall_first_layer && has_bottom_shell_layers(*this->config);
     for (size_t order_idx = 0; order_idx < surface_order.size(); order_idx++) {
+        ExtrusionEntityCollection *island_perimeters = nullptr;
         const Surface &surface = all_surfaces[surface_order[order_idx]];
         // detect how many perimeters must be generated for this island
         int loop_number = this->config->wall_loops + surface.extra_perimeters - 1;  // 0-indexed loops
@@ -1985,8 +1991,10 @@ void PerimeterGenerator::process_classic()
             defer_unsupported_loops(*this, entities);
 
             // append perimeters for this slice as a collection
-            if (! entities.empty())
+            if (! entities.empty()) {
                 this->loops->append(entities);
+                island_perimeters = static_cast<ExtrusionEntityCollection *>(this->loops->entities.back());
+            }
 
         } // for each loop of an island
 
@@ -2097,7 +2105,7 @@ void PerimeterGenerator::process_classic()
             infill_exp = union_ex(infill_exp, one_wall_top_reclaimed);
         this->fill_surfaces->append(infill_exp, stInternal);
 
-        apply_extra_perimeters(infill_exp);
+        apply_extra_perimeters(infill_exp, island_perimeters);
 
         // BBS: get the no-overlap infill expolygons
         {
@@ -2607,6 +2615,7 @@ void PerimeterGenerator::process_arachne()
     // we need to process each island separately because we might have different
     // extra perimeters for each one
     for (const Surface& surface : all_surfaces) {
+        ExtrusionEntityCollection *island_perimeters = nullptr;
         coord_t bead_width_0 = ext_perimeter_spacing;
         // detect how many perimeters must be generated for this island
         int loop_number = this->config->wall_loops + surface.extra_perimeters - 1; // 0-indexed loops
@@ -3010,6 +3019,7 @@ void PerimeterGenerator::process_arachne()
             }
             defer_unsupported_loops(*this, extrusion_coll);
             this->loops->append(extrusion_coll);
+            island_perimeters = static_cast<ExtrusionEntityCollection *>(this->loops->entities.back());
         }
 
         const coord_t spacing = (perimeters.size() == 1) ? ext_perimeter_spacing2 : perimeter_spacing;
@@ -3054,7 +3064,7 @@ void PerimeterGenerator::process_arachne()
         }
         this->fill_surfaces->append(infill_exp, stInternal);
 
-        apply_extra_perimeters(infill_exp);
+        apply_extra_perimeters(infill_exp, island_perimeters);
 
         // BBS: get the no-overlap infill expolygons
         {

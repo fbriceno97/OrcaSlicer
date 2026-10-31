@@ -94,6 +94,21 @@ TEST_CASE("Enabled wave-overhangs generate flagged toolpaths for unsupported she
     CHECK(count_waves(wave) > 0);
 }
 
+TEST_CASE("Wave islands keep their own collection when unsupported walls are deferred", "[WaveOverhangs][Windows]")
+{
+    const char *wall_generator = GENERATE("classic", "arachne");
+    TriangleMesh model_mesh = make_cube(10., 10., 10.);
+    TriangleMesh plate = make_cube(30., 30., 2.);
+    plate.translate(-10.f, -10.f, 10.f);
+    model_mesh.merge(plate);
+    DynamicPrintConfig config = settings(true);
+    config.set_deserialize_strict({{"wall_generator", wall_generator}, {"unsupported_wall_last", "1"}});
+    Print print;
+    Model model;
+    Test::init_and_process_print({model_mesh}, print, model, config);
+    CHECK(count_waves(print) > 0);
+}
+
 TEST_CASE("Exported wave moves respect their speed cap with dynamic overhang control on or off", "[WaveOverhangs][Windows]")
 {
     const bool dynamic_overhang_speed = GENERATE(false, true);
