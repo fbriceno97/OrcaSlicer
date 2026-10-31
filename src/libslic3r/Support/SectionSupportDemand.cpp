@@ -290,9 +290,11 @@ void generate_section_support_family(const SectionSupportFamily &family,
         check_cancel();
         if (!child->segment()->is_root() && !child->segment()->touches_base_plane() && child->has_support())
             throw SlicingError(_u8L("Support below a section's floating base is not supported."));
-        if (child->has_support() && is_tree(child->config().support_type.value) &&
+        const SupportMaterialStyle style = child->config().support_style.value;
+        const bool classic_tree = style == smsTreeHybrid || style == smsTreeSlim || style == smsTreeStrong;
+        if (child->has_support() && is_tree(child->config().support_type.value) && !classic_tree &&
             (!child->segment_support_demand().empty() || !child->segment_body_demand().empty()))
-            throw SlicingError(_u8L("Plane sections with inherited support load currently require normal supports."));
+            throw SlicingError(_u8L("Inherited section loads require normal or classic tree supports."));
         child->update_slicing_parameters();
         child->generate_support_material(false);
         if (child->segment()->is_root())

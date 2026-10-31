@@ -11,6 +11,7 @@
 #include <cmath>
 #include <deque>
 #include <iterator>
+#include <initializer_list>
 #include <math.h>
 
 #include "libslic3r/Point.hpp"
@@ -1209,6 +1210,32 @@ void TreeSupport::detect_overhangs(bool check_support_necessity/* = false*/)
         }
     }
 
+    // Inherited load is a structural contact on an otherwise empty virtual
+    // layer, not a painted model overhang. Seed fresh bands after pruning and
+    // map them to the tree's actual contact bottom minus its top gap.
+    std::vector<ExPolygons> inherited_overhangs;
+    if (!m_object->segment_support_demand().empty() || !m_object->segment_body_demand().empty())
+        inherited_overhangs.resize(m_object->layer_count());
+    for (const bool flush : {false, true}) {
+        const auto &demand = flush ? m_object->segment_support_demand() : m_object->segment_body_demand();
+        for (size_t i = 0; i < demand.size() && i < inherited_overhangs.size(); ++i) {
+            if (demand[i].empty() || inherited_overhangs.size() < 2)
+                continue;
+            Polygons fresh = i + 1 < demand.size() ? diff(demand[i], demand[i + 1]) : demand[i];
+            if (fresh.empty())
+                continue;
+            const double target = m_object->get_layer(i)->print_z - (flush ? 0. : top_z_distance);
+            size_t contact_layer = std::max(size_t(1), i);
+            while (contact_layer + 1 < inherited_overhangs.size() &&
+                m_object->get_layer(contact_layer + 1)->bottom_z() - top_z_distance <= target + EPSILON)
+                ++contact_layer;
+            append(inherited_overhangs[contact_layer], union_ex(fresh));
+        }
+    }
+    for (ExPolygons &footprint : inherited_overhangs)
+        if (!footprint.empty())
+            footprint = union_ex(footprint);
+
     int layers_with_overhangs = 0;
     int layers_with_enforcers = 0;
     for (int layer_nr = 0; layer_nr < m_object->layer_count(); layer_nr++) {
@@ -1269,13 +1296,16 @@ void TreeSupport::detect_overhangs(bool check_support_necessity/* = false*/)
         }
         int nEnforced = layer->loverhangs.size();
 
-        // add sharp tail overhangs
+        // Append every category before taking addresses for overhang_types.
         append(layer->loverhangs, sharp_tail_overhangs);
+        const size_t sharp_tail_end = layer->loverhangs.size();
+        if (!inherited_overhangs.empty())
+            append(layer->loverhangs, inherited_overhangs[layer_nr]);
 
-        // fill overhang_types
         for (size_t i = 0; i < layer->loverhangs.size(); i++)
             overhang_types.emplace(&layer->loverhangs[i], i < nDetected ? OverhangType::Detected :
-                i < nEnforced ? OverhangType::Enforced : OverhangType::SharpTail);
+                i < nEnforced ? OverhangType::Enforced :
+                i < sharp_tail_end ? OverhangType::SharpTail : OverhangType::Enforced);
 
         if (!layer->loverhangs.empty()) {
             layers_with_overhangs++;
