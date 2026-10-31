@@ -487,6 +487,7 @@ jobs:
             exit $buildExit
           }
           $testExit = 0
+          $env:ORCA_TEST_GCODE_ARTIFACT_DIR = Join-Path $env:RUNNER_TEMP 'orca-feature-gcode'
           foreach ($suite in @('fff_print', 'libslic3r')) {
             $report = Join-Path $env:RUNNER_TEMP "orca-$suite-features.xml"
             $testLog = Join-Path $env:RUNNER_TEMP "orca-$suite-features.log"
@@ -495,6 +496,12 @@ jobs:
             Write-Host "$suite feature test exit code: $suiteExit"
             python scripts/report_ctest_failures.py $report
             if ($suiteExit -ne 0) { $testExit = $suiteExit }
+          }
+          if (Test-Path $env:ORCA_TEST_GCODE_ARTIFACT_DIR) {
+            Get-ChildItem $env:ORCA_TEST_GCODE_ARTIFACT_DIR -Filter '*.gcode' -File | ForEach-Object {
+              $digest = (Get-FileHash $_.FullName -Algorithm SHA256).Hash
+              Write-Host "G-code fixture: $($_.Name), bytes=$($_.Length), sha256=$digest"
+            }
           }
           exit $testExit
 
@@ -506,6 +513,7 @@ jobs:
           path: |
             ${{ runner.temp }}/orca-*-features.xml
             ${{ runner.temp }}/orca-*-features.log
+            ${{ runner.temp }}/orca-feature-gcode/
           if-no-files-found: ignore
           retention-days: 5
 

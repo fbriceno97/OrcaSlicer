@@ -8,7 +8,12 @@
 #include <cstddef>
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <fstream>
+#include <ios>
 #include <string>
+#include <boost/filesystem/path.hpp>
+#include <boost/filesystem/operations.hpp>
 #include "libslic3r/ExtrusionEntity.hpp"
 #include "libslic3r/ExtrusionEntityCollection.hpp"
 #include "libslic3r/GCodeReader.hpp"
@@ -21,6 +26,19 @@
 using namespace Slic3r;
 
 namespace {
+void preserve_gcode_fixture(const std::string &name, const std::string &gcode)
+{
+    const char *directory = std::getenv("ORCA_TEST_GCODE_ARTIFACT_DIR");
+    if (directory == nullptr || *directory == '\0')
+        return;
+    boost::filesystem::create_directories(directory);
+    std::ofstream output((boost::filesystem::path(directory) / name).string(), std::ios::binary);
+    REQUIRE(output.is_open());
+    output << "; Software regression fixture; physical printer validation is separate.\n" << gcode;
+    output.flush();
+    REQUIRE(output.good());
+}
+
 TriangleMesh unsupported_shelf()
 {
     TriangleMesh stem  = make_cube(10., 10., 10.);
@@ -123,6 +141,8 @@ TEST_CASE("Exported wave moves respect their speed cap with dynamic overhang con
         {"enable_arc_fitting", "0"},
     });
     const std::string gcode = Test::slice({unsupported_shelf()}, config);
+    preserve_gcode_fixture(std::string("wave-speed-") + (dynamic_overhang_speed ? "dynamic-" : "fixed-") +
+        std::to_string(bridge_speed) + ".gcode", gcode);
     GCodeReader reader;
     reader.apply_config(config);
     bool in_wave = false;
@@ -171,6 +191,7 @@ TEST_CASE("Wave cooling overrides restore ordinary cooling and respect layers wi
         {"initial_layer_fan_speed", "-1"}, {"part_cooling_fan_min_pwm", "0"}
     });
     const std::string output = Test::slice({unsupported_shelf()}, config);
+    preserve_gcode_fixture(cooling_disabled ? "wave-fan-disabled.gcode" : "wave-fan-override.gcode", output);
     CHECK(output.find(";_WAVE_FAN_") == std::string::npos);
     GCodeReader reader;
     reader.apply_config(config);
