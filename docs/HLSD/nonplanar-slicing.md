@@ -80,8 +80,12 @@ the logical position as uncommanded until the first absolute XYZ move. The write
 retains the last emitted section endpoint independently of planned layer Z.
 Custom-position variables, frame exit and in-place lift checks use that endpoint,
 so planning a layer cannot teleport macro coordinates or trigger a lift through a
-pose the printer has not reached. Layer-height placeholders and raw macro motion
-still require separate section integration. This scope remains behind
+pose the printer has not reached. The `max_layer_z` macro override uses the highest generated positive-extrusion
+machine endpoint, including Z calibration, seeded from processed startup material.
+Descending deposition includes its starting height; planned positions, travel and
+retracting wipes do not raise this maximum. Caller override data stays unchanged.
+Other layer-height placeholders and raw macro motion still require separate
+section integration. This scope remains behind
 the export guard; frame binding alone does not establish complete motion safety
 or correct section-layer settings. This includes explicitly directed
 parts with zero rotation: their rebased layer schedules still require section

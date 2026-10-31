@@ -214,6 +214,27 @@ void GCodeWriter::remember_section_position()
     }
 }
 
+void GCodeWriter::seed_deposition_height(double height)
+{
+    if (!std::isfinite(height) || height < 0.)
+        throw std::invalid_argument("Invalid physical deposition height");
+    m_max_deposited_machine_z = std::max(m_max_deposited_machine_z, height);
+}
+
+void GCodeWriter::remember_deposition(double extrusion, bool force_no_extrusion, double start_z)
+{
+    if (!section_motion_limits_enabled() || force_no_extrusion)
+        return;
+    if (!std::isfinite(extrusion))
+        throw std::invalid_argument("Nonfinite section extrusion amount");
+    if (extrusion <= 0.)
+        return;
+    const double end_z = position_for_custom_gcode().z();
+    if (!std::isfinite(start_z) || !std::isfinite(end_z))
+        throw std::invalid_argument("Nonfinite deposited section height");
+    m_max_deposited_machine_z = std::max(m_max_deposited_machine_z, std::max(start_z, end_z));
+}
+
 bool GCodeWriter::supports_separate_travel_acceleration(GCodeFlavor flavor)
 {
     return (flavor == gcfRepetier || flavor == gcfMarlinFirmware ||  flavor == gcfRepRapFirmware);
@@ -222,6 +243,7 @@ bool GCodeWriter::supports_separate_travel_acceleration(GCodeFlavor flavor)
 void GCodeWriter::apply_print_config(const PrintConfig &print_config)
 {
     m_section_motion_limits = false;
+    m_max_deposited_machine_z = 0.;
     this->config.apply(print_config, true);
     m_section_tool_offsets = print_config.extruder_offset.values;
     m_section_z_offset = print_config.z_offset.value;
@@ -1431,6 +1453,7 @@ std::string GCodeWriter::extrude_to_xy(const Vec2d &point, double dE, const std:
 
 void GCodeWriter::extrude_to_xy(std::string &out, const Vec2d &point, double dE, const std::string &comment, bool force_no_extrusion)
 {
+    const double start_z = section_motion_limits_enabled() ? position_for_custom_gcode().z() : 0.;
     m_pos(0) = point(0);
     m_pos(1) = point(1);
     if(std::abs(dE) <= std::numeric_limits<double>::epsilon())
@@ -1455,6 +1478,7 @@ void GCodeWriter::extrude_to_xy(std::string &out, const Vec2d &point, double dE,
     w.emit_comment(GCodeWriter::full_gcode_comment, comment);
     w.append_to(out);
     remember_section_position();
+    remember_deposition(dE, force_no_extrusion, start_z);
 }
 
 // Approximate an arc with linear extrusions, for machine mappings that cannot
@@ -1548,6 +1572,7 @@ std::string GCodeWriter::extrude_to_xyz(const Vec3d &point, double dE, const std
 
 void GCodeWriter::extrude_to_xyz(std::string &out, const Vec3d &point, double dE, const std::string &comment, bool force_no_extrusion)
 {
+    const double start_z = section_motion_limits_enabled() ? position_for_custom_gcode().z() : 0.;
     // Check if Z actually changes (at export precision) before emitting it.
     // ZAA sloped extrusions call this for every segment, but many consecutive
     // segments share the same quantized Z — emitting it every time is redundant.
@@ -1580,6 +1605,7 @@ void GCodeWriter::extrude_to_xyz(std::string &out, const Vec3d &point, double dE
     w.emit_comment(GCodeWriter::full_gcode_comment, comment);
     w.append_to(out);
     remember_section_position();
+    remember_deposition(dE, force_no_extrusion, start_z);
 }
 
 std::string GCodeWriter::retract(bool before_wipe, double retract_length)

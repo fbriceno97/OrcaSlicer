@@ -4556,8 +4556,11 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
         if (print.config().print_sequence == PrintSequence::ByObject && !has_wipe_tower) {
             if (has_sections && m_fan_mover)
                 file.write(m_fan_mover->process_gcode("", true));
-            if (has_sections)
-                m_max_layer_z = static_cast<float>(max_printed_machine_z(m_processor.get_result(), 0, 0., m_config.z_offset.value));
+            if (has_sections) {
+                const double deposited_z = max_printed_machine_z(m_processor.get_result(), 0, 0., m_config.z_offset.value);
+                m_max_layer_z = static_cast<float>(deposited_z);
+                m_writer.seed_deposition_height(deposited_z);
+            }
             size_t finished_objects = 0;
             print_object_instance_sequential_active = first_has_extrude_print_object;
             const PrintObject *prev_object = (*print_object_instance_sequential_active)->print_object;
@@ -5342,7 +5345,17 @@ std::string GCode::placeholder_parser_process(const std::string &name, const std
 PlaceholderParserIntegration &ppi = m_placeholder_parser_integration;
     try {
         ppi.update_from_gcodewriter(m_writer);
-        std::string output = ppi.parser.process(templ, current_filament_id, config_override, &ppi.output_config, &ppi.context);
+        DynamicConfig physical_override;
+        const DynamicConfig *effective_override = config_override;
+        if (m_writer.section_motion_limits_enabled() && config_override && config_override->has("max_layer_z")) {
+            physical_override.apply(*config_override);
+            // Raw macro Z commands bypass writer calibration. Supply the full
+            // deposited machine height, including calibration, not local layer Z.
+            physical_override.set_key_value("max_layer_z", new ConfigOptionFloat(
+                m_writer.max_deposited_machine_z()));
+            effective_override = &physical_override;
+        }
+        std::string output = ppi.parser.process(templ, current_filament_id, effective_override, &ppi.output_config, &ppi.context);
         ppi.validate_output_vector_variables();
         const CustomGCodeMotionStateChanges motion_state_changes = custom_gcode_motion_state_changes(output);
         if (motion_state_changes.acceleration)

@@ -178,6 +178,9 @@ public:
     void set_section_transform(const std::optional<Transform3d> &transform);
     // Keep physical limits active for generated global transitions between frames.
     void set_section_motion_limits(bool enabled) { m_section_motion_limits = enabled; }
+    bool section_motion_limits_enabled() const { return m_section_motion_limits || m_section_transform.has_value(); }
+    double max_deposited_machine_z() const { return m_max_deposited_machine_z; }
+    void seed_deposition_height(double height);
     bool has_section_transform() const { return m_section_transform.has_value(); }
     bool supports_arc_moves() const { return !m_section_transform && m_kinematics->supports_arc_moves(); }
 
@@ -247,6 +250,8 @@ protected:
     double m_section_machine_acceleration_z {0.};
     std::optional<Vec3d> m_section_emitted_position;
     void remember_section_position();
+    double m_max_deposited_machine_z {0.};
+    void remember_deposition(double extrusion, bool force_no_extrusion, double start_z);
     Vec3d section_physical_offset() const;
     Vec3d map_section_point(const Vec3d &point) const;
 

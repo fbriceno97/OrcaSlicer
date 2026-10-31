@@ -186,6 +186,68 @@ TEST_CASE("Section XYZ motion restores each scaled and mirrored copy without rot
     }
 }
 
+TEST_CASE("Section deposition height includes descending starts and ignores planned and nonprinting heights", "[GCodeWriter][Nonplanar]")
+{
+    PrintConfig config;
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    writer.seed_deposition_height(30.);
+    Transform3d frame = Transform3d::Identity();
+    frame.translation().z() = 10.;
+    writer.set_section_transform(frame);
+    writer.travel_to_xyz(Vec3d(1., 2., 40.));
+    CHECK(writer.max_deposited_machine_z() == 30.);
+    writer.get_position().z() += 500.; // planning must not inflate deposited height
+    writer.extrude_to_xyz(Vec3d(1., 3., 35.), 1.);
+    CHECK(writer.max_deposited_machine_z() == 50.);
+    writer.extrude_to_xyz(Vec3d(1., 4., 80.), -0.1);
+    writer.extrude_to_xyz(Vec3d(1., 5., 100.), 1., "", true);
+    CHECK(writer.max_deposited_machine_z() == 50.);
+    writer.extrude_to_xy(Vec2d(2., 5.), 1.);
+    CHECK(writer.max_deposited_machine_z() == 110.);
+    writer.seed_deposition_height(10.);
+    CHECK(writer.max_deposited_machine_z() == 110.);
+    writer.set_section_transform(std::nullopt);
+    writer.apply_print_config(config);
+    CHECK(writer.max_deposited_machine_z() == 0.);
+    CHECK_THROWS_AS(writer.seed_deposition_height(-1.), std::invalid_argument);
+}
+
+TEST_CASE("Section macro clearance uses deposited machine height without mutating local overrides", "[GCodeWriter][Nonplanar]")
+{
+    const int context = GENERATE(0, 1, 2);
+    struct HeightGCode : GCode {
+        HeightGCode()
+        {
+            PrintConfig config;
+            config.z_offset.value = 0.2;
+            m_config.apply(config, true);
+            m_writer.apply_print_config(config);
+            m_writer.set_extruders({0});
+            m_writer.set_extruder(0);
+            m_placeholder_parser_integration.init(m_writer);
+        }
+    } generator;
+    generator.writer().seed_deposition_height(70.2);
+    if (context == 1)
+        generator.writer().set_section_transform(Transform3d::Identity());
+    generator.writer().set_section_motion_limits(context == 2);
+    DynamicConfig overrides;
+    overrides.set_key_value("max_layer_z", new ConfigOptionFloat(1.));
+    const std::string output = generator.placeholder_parser_process("machine_end_gcode", "G1 Z{max_layer_z + 3}\n", 0, &overrides);
+    REQUIRE(output.find("!!!!!") == std::string::npos);
+    GCodeReader reader;
+    float z = -1.f;
+    reader.parse_buffer(output, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
+        if (line.cmd_is("G1") && line.has(Z))
+            z = line.z();
+    });
+    CHECK_THAT(z, Catch::Matchers::WithinAbs(context == 0 ? 4. : 73.2, 0.001));
+    CHECK(overrides.opt_float("max_layer_z") == 1.);
+}
+
 TEST_CASE("Section acceleration bounds print and travel including inherited settings", "[GCodeWriter][Nonplanar]")
 {
     const int context = GENERATE(0, 1, 2); // ordinary, section frame, global section transition
