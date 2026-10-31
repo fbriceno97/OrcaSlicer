@@ -44,7 +44,9 @@ The initial toolpath preview uses the same per-copy inverse slicing map to place
 section perimeter, infill and support vertices back in world geometry. Machine
 calibration is excluded from this model-space view.
 Section preview keeps local layer order in separate slider ranges rather than
-sorting vertices by world Z. A tilted layer has varying world Z, and an upper
+sorting vertices by world Z. It waits for both model and support rows at each
+height before compacting empty planning rows, so an empty model row cannot
+remove a support-only slider height. A tilted layer has varying world Z, and an upper
 section's rebased heights cannot be compared with its physical coordinates.
 
 A model-space bound `n*x <= d` becomes `n_s*s <= d + n_s*t`, where

@@ -822,9 +822,11 @@ static void convert_object_to_vertices(const Slic3r::PrintObject& object, const 
         }
         // filter out empty layers
         const size_t new_vertices_count = data.vertices.size();
-        if (new_vertices_count == old_vertices_count)
+        if (!object.segment() && new_vertices_count == old_vertices_count)
             data.layers_zs.erase(data.layers_zs.begin() + layer_id);
     }
+    if (object.segment())
+        compact_section_layers(data.vertices, data.layers_zs);
 }
 
 static void convert_objects_to_vertices(const Slic3r::ConstPrintObjectPtrsAdaptor& objects, const std::vector<std::string>& str_tool_colors,

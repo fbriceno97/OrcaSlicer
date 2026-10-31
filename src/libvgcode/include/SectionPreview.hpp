@@ -5,11 +5,38 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstddef>
+#include <utility>
 #include <limits>
 #include <stdexcept>
 #include <vector>
 
 namespace libvgcode {
+
+// Keep support-only rows even when an empty model row shares their height.
+// Call after every row has contributed vertices, before appending the section.
+inline void compact_section_layers(std::vector<PathVertex> &vertices, std::vector<float> &layers_zs)
+{
+    if (layers_zs.size() > std::numeric_limits<uint32_t>::max())
+        throw std::overflow_error("Section preview exceeds the supported layer count");
+    std::vector<bool> occupied(layers_zs.size(), false);
+    for (const PathVertex &vertex : vertices) {
+        if (vertex.layer_id >= layers_zs.size())
+            throw std::invalid_argument("Section preview vertex has no layer height");
+        occupied[vertex.layer_id] = true;
+    }
+    std::vector<uint32_t> mapping(layers_zs.size());
+    std::vector<float> compact;
+    compact.reserve(layers_zs.size());
+    for (size_t i = 0; i < layers_zs.size(); ++i)
+        if (occupied[i]) {
+            mapping[i] = static_cast<uint32_t>(compact.size());
+            compact.push_back(layers_zs[i]);
+        }
+    for (PathVertex &vertex : vertices)
+        vertex.layer_id = mapping[vertex.layer_id];
+    layers_zs = std::move(compact);
+}
 
 // Section-local layer indices cannot be merged by physical Z: a tilted layer
 // spans several Z values, and a rebased upper section starts above local Z=0.

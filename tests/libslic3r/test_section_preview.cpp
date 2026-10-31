@@ -55,3 +55,36 @@ TEST_CASE("Invalid section preview appends fail without changing vertices", "[Se
     CHECK_THROWS_AS(libvgcode::append_section_vertices(vertices, vertices, 1), std::invalid_argument);
     CHECK(vertices.size() == 1);
 }
+
+TEST_CASE("Section preview retains support-only heights and compacts empty planning rows", "[SectionPreview][Nonplanar]")
+{
+    std::vector<float> heights {0.2f, 0.4f, 0.6f, 0.8f, 1.f};
+    // Model row 2 contributes nothing; the support row at that same height
+    // contributes these vertices. Later planning rows contain neither kind.
+    std::vector<libvgcode::PathVertex> vertices {
+        preview_vertex(0.2f, 0), preview_vertex(0.6f, 2), preview_vertex(0.6f, 2)};
+    libvgcode::compact_section_layers(vertices, heights);
+    REQUIRE(heights.size() == 2);
+    CHECK_THAT(heights[0], Catch::Matchers::WithinAbs(0.2, 1e-6));
+    CHECK_THAT(heights[1], Catch::Matchers::WithinAbs(0.6, 1e-6));
+    CHECK(vertices[0].layer_id == 0);
+    CHECK(vertices[1].layer_id == 1);
+    CHECK(vertices[2].layer_id == 1);
+    std::vector<libvgcode::PathVertex> combined;
+    CHECK(libvgcode::append_section_vertices(combined, vertices, 4) == 6);
+    CHECK(combined.back().layer_id == 5);
+    vertices.clear();
+    libvgcode::compact_section_layers(vertices, heights);
+    CHECK(heights.empty());
+}
+
+TEST_CASE("Invalid section preview layer compaction leaves geometry and heights unchanged", "[SectionPreview][Nonplanar]")
+{
+    std::vector<float> heights {0.2f};
+    std::vector<libvgcode::PathVertex> vertices {preview_vertex(5.f, 0), preview_vertex(6.f, 1)};
+    CHECK_THROWS_AS(libvgcode::compact_section_layers(vertices, heights), std::invalid_argument);
+    REQUIRE(heights.size() == 1);
+    CHECK_THAT(heights[0], Catch::Matchers::WithinAbs(0.2, 1e-6));
+    CHECK(vertices[0].layer_id == 0);
+    CHECK(vertices[1].layer_id == 1);
+}
