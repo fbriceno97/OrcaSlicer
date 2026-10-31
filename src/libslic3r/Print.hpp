@@ -380,6 +380,12 @@ public:
     const std::optional<CutSegmentDescriptor>& segment() const { return m_segment; }
     int                         segment_index() const { return m_segment ? m_segment->index : -1; }
     size_t                      nonplanar_instance_key() const { return m_nonplanar_instance_key; }
+    const std::vector<Polygons>& segment_support_demand() const { return m_segment_support_demand; }
+    const std::vector<Polygons>& segment_body_demand() const { return m_segment_body_demand; }
+    void clear_segment_support_demand();
+    void add_segment_support_demand(const std::vector<Polygons> &demand);
+    void add_segment_body_demand(const std::vector<Polygons> &demand);
+
     // Trafo with the center_offset() applied after the transformation, to center the object in XY before slicing.
     Transform3d                  trafo_centered() const
         { Transform3d t = this->trafo(); t.pretranslate(Vec3d(- unscale<double>(m_center_offset.x()), - unscale<double>(m_center_offset.y()), 0)); return t; }
@@ -674,6 +680,9 @@ private:
     Transform3d                             m_trafo = Transform3d::Identity();
     std::optional<CutSegmentDescriptor>      m_segment;
     size_t                                  m_nonplanar_instance_key {0};
+    // Transient load from later plane sections, in this object's slicing frame.
+    std::vector<Polygons>                    m_segment_support_demand;
+    std::vector<Polygons>                    m_segment_body_demand;
     // Slic3r::Point objects in scaled G-code coordinates
     std::vector<PrintInstance>              m_instances;
     // The mesh is being centered before thrown to Clipper, so that the Clipper's fixed coordinates require less bits.

@@ -72,9 +72,15 @@ visits children before receivers and lifts each footprint onto its authored floo
 before changing frames. Independent cutting and build normals therefore retain
 the correct contact position. A receiver carries only load not already caught by
 its material; a shelf that catches load prevents it reappearing below. Projection
-rejects cross-instance handoffs and unrepresentable receiver planes. Parent
-support-demand consumption and classic tree branch anchoring still require
-integration before section export can be enabled.
+rejects cross-instance handoffs and unrepresentable receiver planes. Normal
+support generation consumes fresh inherited load in child-first order,
+with separate model-contact gaps and flush support-column contacts. Extra empty
+planning layers let contacts reach the receiving ceiling; they are omitted from
+export and progress counts. Support enable/gap changes invalidate that schedule.
+Slicing-cache equivalence includes section and instance identity, and transient
+load is rebuilt on every family generation. Tree-support inheritance and support
+below floating bases are rejected by the family generator. The section export
+guard remains active.
 
 Derived sections are rejected by print validation, processing, and export while
 safe section transitions and support propagation remain incomplete. A sequential

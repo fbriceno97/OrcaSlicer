@@ -1,3 +1,5 @@
+#include <initializer_list>
+#include "SegmentSupportBounds.hpp"
 #include "ClipperUtils.hpp"
 #include "libslic3r/ExPolygon.hpp"
 #include "ExtrusionEntity.hpp"
@@ -2212,6 +2214,7 @@ SupportGeneratorLayersPtr PrintObjectSupportMaterial::top_contact_layers(
     contact_out.assign(num_layers * 2, nullptr);
 
     std::vector<ExPolygons> overhangs_per_layers(num_layers);
+    const SegmentSupportBounds section_floor(object);
     size_t layer_id_start = this->has_raft() ? 0 : 1;
      // main part of overhang detection can be parallel
     tbb::parallel_for(tbb::blocked_range<size_t>(layer_id_start, num_layers),
@@ -2219,6 +2222,9 @@ SupportGeneratorLayersPtr PrintObjectSupportMaterial::top_contact_layers(
             for (size_t layer_id = range.begin(); layer_id < range.end(); layer_id++) {
                 const Layer& layer = *object.layers()[layer_id];
                 Polygons            lower_layer_polygons = (layer_id == 0) ? Polygons() : to_polygons(object.layers()[layer_id - 1]->lslices);
+                if (section_floor.is_active())
+                    lower_layer_polygons = union_(lower_layer_polygons,
+                        section_floor.floor_band(layer.print_z - layer.height, layer.print_z));
 
                 overhangs_per_layers[layer_id] = detect_overhangs(layer, layer_id, lower_layer_polygons, *m_print_config, *m_object_config, annotations, m_support_params.gap_xy
 #ifdef SLIC3R_DEBUG
@@ -2400,6 +2406,34 @@ SupportGeneratorLayersPtr PrintObjectSupportMaterial::top_contact_layers(
 
     if (object.print()->canceled())
         return SupportGeneratorLayersPtr();
+
+    // Inherited loads are not paint enforcers: the receiving layer may contain
+    // no model material. Seed only new load, after small-island pruning, and map
+    // it to the virtual layer whose generated contact reaches the desired height.
+    const auto contact_height = [&](size_t index) {
+        const Layer &layer = *object.layers()[index];
+        if (m_slicing_params.zero_gap_interface_top)
+            return layer.bottom_z();
+        if (m_print_config->independent_support_layer_height)
+            return layer.bottom_z() - m_slicing_params.gap_support_object;
+        return sync_gap_with_object_layer(layer, m_slicing_params.gap_support_object, true)->print_z;
+    };
+    for (const bool flush : {false, true}) {
+        const auto &demand = flush ? object.segment_support_demand() : object.segment_body_demand();
+        for (size_t i = 0; i < demand.size() && i < num_layers && layer_id_start < num_layers; ++i) {
+            if (demand[i].empty())
+                continue;
+            Polygons fresh = i + 1 < demand.size() ? diff(demand[i], demand[i + 1]) : demand[i];
+            if (fresh.empty())
+                continue;
+            const double gap = m_slicing_params.zero_gap_interface_top ? 0. : m_slicing_params.gap_support_object;
+            const double target = object.layers()[i]->print_z - (flush ? 0. : gap);
+            size_t target_layer = std::max(layer_id_start, i);
+            while (target_layer + 1 < num_layers && contact_height(target_layer + 1) <= target + EPSILON)
+                ++target_layer;
+            append(overhangs_per_layers[target_layer], union_ex(fresh));
+        }
+    }
 
     for (size_t layer_id = layer_id_start; layer_id < num_layers; layer_id++) {
         const Layer& layer = *object.layers()[layer_id];

@@ -3,6 +3,9 @@
 #include "SectionSupportDemand.hpp"
 #include "SegmentSupportBounds.hpp"
 #include "../Print.hpp"
+#include "../PrintConfig.hpp"
+#include "../Exception.hpp"
+#include "../I18N.hpp"
 #include "../Model.hpp"
 #include "../ObjectID.hpp"
 #include "../Layer.hpp"
@@ -56,6 +59,67 @@ coord_t bounded_strip_coordinate(double mm, coord_t low, coord_t high)
         return high;
     return scale_(mm);
 }
+}
+
+double section_support_layer_top(const PrintObject &object)
+{
+    if (!object.segment())
+        throw std::invalid_argument("Section support planning requires a section");
+    const auto &segment = *object.segment();
+    const double top = std::max(segment.build_z_max, segment.support_z_max);
+    if (!object.has_support() || std::none_of(segment.clips.begin(), segment.clips.end(), [](const CutSegmentClip &clip) {
+            return clip.role == CutClipRole::Ceiling;
+        }))
+        return top;
+    const PrintConfig &config = object.print()->config();
+    double tallest = std::max(object.config().layer_height.value, config.initial_layer_print_height.value);
+    for (double height : config.max_layer_height.values)
+        tallest = std::max(tallest, height);
+    for (double diameter : config.nozzle_diameter.values)
+        tallest = std::max(tallest, 0.75 * diameter);
+    return std::max(segment.build_z_max, segment.support_z_max + object.config().support_top_z_distance.value + 2. * tallest);
+}
+
+namespace {
+bool merge_demand(std::vector<Polygons> &destination, const std::vector<Polygons> &source, size_t layers)
+{
+    if (source.size() > layers)
+        throw std::invalid_argument("Section demand does not match the receiving layer schedule");
+    if (std::none_of(source.begin(), source.end(), [](const Polygons &polygons) { return !polygons.empty(); }))
+        return false;
+    destination.resize(layers);
+    for (size_t i = 0; i < source.size(); ++i)
+        if (!source[i].empty()) {
+            polygons_append(destination[i], source[i]);
+            destination[i] = union_(destination[i]);
+        }
+    return true;
+}
+}
+
+void PrintObject::clear_segment_support_demand()
+{
+    const bool had_load = !m_segment_support_demand.empty() || !m_segment_body_demand.empty();
+    m_segment_support_demand.clear();
+    m_segment_body_demand.clear();
+    if (had_load)
+        invalidate_step(posSupportMaterial);
+}
+
+void PrintObject::add_segment_support_demand(const std::vector<Polygons> &demand)
+{
+    if (!m_segment)
+        throw std::invalid_argument("Ordinary objects cannot receive section demand");
+    if (merge_demand(m_segment_support_demand, demand, m_layers.size()))
+        invalidate_step(posSupportMaterial);
+}
+
+void PrintObject::add_segment_body_demand(const std::vector<Polygons> &demand)
+{
+    if (!m_segment)
+        throw std::invalid_argument("Ordinary objects cannot receive section demand");
+    if (merge_demand(m_segment_body_demand, demand, m_layers.size()))
+        invalidate_step(posSupportMaterial);
 }
 
 std::vector<SectionSupportFamily> section_support_families(Print &print)
@@ -198,5 +262,68 @@ std::vector<Polygons> project_section_support_demand(const PrintObject &child,
         }
     }
     return demand;
+}
+}
+
+namespace Slic3r {
+void generate_section_support_family(const SectionSupportFamily &family,
+    const std::function<void()> &throw_on_cancel)
+{
+    if (family.empty())
+        return;
+    const auto check_cancel = [&] {
+        if (family.front()->print()->canceled())
+            throw CanceledException();
+        if (throw_on_cancel)
+            throw_on_cancel();
+    };
+    for (PrintObject *object : family) {
+        check_cancel();
+        if (object->has_support() && is_tree(object->config().support_type.value))
+            throw SlicingError(_u8L("Plane sections with inherited support load currently require normal supports."));
+        object->slice();
+        object->make_perimeters();
+        object->prepare_infill();
+        object->clear_segment_support_demand();
+        object->invalidate_step(posSupportMaterial);
+    }
+    for (PrintObject *child : family) {
+        check_cancel();
+        if (!child->segment()->is_root() && !child->segment()->touches_base_plane() && child->has_support())
+            throw SlicingError(_u8L("Support below a section's floating base is not supported."));
+        child->slicing_parameters();
+        child->generate_support_material(false);
+        if (child->segment()->is_root())
+            continue;
+        const double window = 2. * std::max(0.01, child->config().layer_height.value);
+        Polygons support, body;
+        if (!child->support_layers().empty()) {
+            double lowest = std::numeric_limits<double>::max();
+            for (const SupportLayer *layer : child->support_layers())
+                lowest = std::min(lowest, layer->print_z);
+            for (const SupportLayer *layer : child->support_layers())
+                if (layer->print_z <= lowest + window)
+                    polygons_append(support, to_polygons(layer->support_islands));
+        }
+        if (!child->layers().empty()) {
+            const double lowest = child->layers().front()->print_z;
+            for (const Layer *layer : child->layers()) {
+                if (layer->print_z > lowest + window)
+                    break;
+                polygons_append(body, to_polygons(layer->lslices));
+            }
+        }
+        support = union_(support);
+        body = union_(body);
+        for (PrintObject *receiver : family) {
+            check_cancel();
+            if (receiver->segment_index() >= child->segment_index() || !is_auto(receiver->config().support_type.value))
+                continue;
+            if (!support.empty())
+                receiver->add_segment_support_demand(project_section_support_demand(*child, *receiver, support, check_cancel));
+            if (!body.empty())
+                receiver->add_segment_body_demand(project_section_support_demand(*child, *receiver, body, check_cancel));
+        }
+    }
 }
 }

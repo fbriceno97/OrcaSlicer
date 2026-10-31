@@ -170,6 +170,7 @@ TEST_CASE("A floor facing downward in the slice frame cannot support a descendin
     CHECK_THAT(bounds.floor_z(Point::new_scale(0., 0.)), WithinAbs(0., 1e-9));
     CHECK(bounds.valid_region_polygon(11.).empty());
     CHECK(region_contains(bounds.valid_region_polygon(5.), 0., 0.));
+    CHECK(bounds.floor_band(9.8, 10.2).empty());
 }
 
 TEST_CASE("Bounds built from a derived segment agree with its cut planes", "[cutplanes][supports]") {

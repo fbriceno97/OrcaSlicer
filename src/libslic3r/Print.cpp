@@ -4,6 +4,10 @@
 #include <Windows.h>
 #endif
 
+#include <optional>
+#include "Support/SectionSupportDemand.hpp"
+#include "CutPlaneSegmentation.hpp"
+
 #include "PrintBase.hpp"
 #include <utility>
 #include <string>
@@ -3227,6 +3231,9 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
 
     //add the print_object share check logic
     auto is_print_object_the_same = [](const PrintObject* object1, const PrintObject* object2) -> bool{
+        if (object1->segment() != object2->segment() ||
+            object1->nonplanar_instance_key() != object2->nonplanar_instance_key())
+            return false;
         if (object1->trafo().matrix() != object2->trafo().matrix())
             return false;
         const ModelObject* model_obj1 = object1->model_object();
@@ -3274,6 +3281,10 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
     int object_count = m_objects.size();
     std::set<PrintObject*> need_slicing_objects;
     std::set<PrintObject*> re_slicing_objects;
+    const auto support_families = section_support_families(*this);
+    std::unordered_set<PrintObject *> family_members;
+    for (const auto &family : support_families)
+        family_members.insert(family.begin(), family.end());
     // Belt global modes couple each object's bed position into its layer Z values,
     // so sharing layers between "identical" objects is wrong.
     bool belt_no_share = m_config.belt_printer.value;
@@ -3431,10 +3442,18 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
             for (size_t i = 0; i < m_objects.size(); ++i)
                 sup_was_done[i] = m_objects[i]->is_step_done(posSupportMaterial) ? 1 : 0;
 
+        for (const auto &family : support_families) {
+            for (size_t i = 0; i < m_objects.size(); ++i)
+                if (std::find(family.begin(), family.end(), m_objects[i]) != family.end())
+                    sup_was_done[i] = 0;
+            generate_section_support_family(family, [this]() { throw_if_canceled(); });
+        }
         tbb::parallel_for(tbb::blocked_range<int>(0, int(m_objects.size())),
-            [this, need_slicing_objects](const tbb::blocked_range<int>& range) {
+            [this, need_slicing_objects, &family_members](const tbb::blocked_range<int>& range) {
                 for (int i = range.begin(); i < range.end(); i++) {
                     PrintObject* obj = m_objects[i];
+                    if (family_members.count(obj) != 0)
+                        continue;
                     if (need_slicing_objects.count(obj) != 0) {
                         // The belt brim follows sequentially below.
                         obj->generate_support_material(false);
@@ -3493,12 +3512,23 @@ void Print::process(long long *time_cost_with_cache, bool use_cache)
                 obj->make_perimeters();
                 obj->infill();
                 obj->ironing();
-                obj->generate_support_material();
-                obj->detect_overhangs_for_lift();
-                obj->estimate_curled_extrusions();
+                if (family_members.count(obj) == 0) {
+                    obj->generate_support_material();
+                    obj->detect_overhangs_for_lift();
+                    obj->estimate_curled_extrusions();
+                }
             }
         }
     }
+
+    if (use_cache)
+        for (const auto &family : support_families) {
+            generate_section_support_family(family, [this]() { throw_if_canceled(); });
+            for (PrintObject *object : family) {
+                object->detect_overhangs_for_lift();
+                object->estimate_curled_extrusions();
+            }
+        }
 
     for (PrintObject *obj : m_objects)
     {
