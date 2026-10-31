@@ -151,7 +151,7 @@ Vec3d GCodeWriter::map_section_point(const Vec3d &point) const
 Vec3d GCodeWriter::position_for_custom_gcode() const
 {
     if (!m_section_transform)
-        return m_pos;
+        return m_section_motion_limits ? Vec3d(m_pos - Vec3d(m_x_offset, m_y_offset, 0.)) : m_pos;
     if (m_section_emitted_position)
         return *m_section_emitted_position;
     const Vec3d plate(m_x_offset, m_y_offset, 0.);
@@ -163,7 +163,11 @@ Vec3d GCodeWriter::position_for_custom_gcode() const
 void GCodeWriter::set_position_from_custom_gcode(const Vec3d &position)
 {
     if (!m_section_transform) {
-        m_pos = position;
+        if (m_section_motion_limits && !position.allFinite())
+            throw std::invalid_argument("Custom G-code position must be finite");
+        // Generated global moves still subtract the plate origin. Raw macros
+        // already use machine coordinates, including between section frames.
+        m_pos = m_section_motion_limits ? Vec3d(position + Vec3d(m_x_offset, m_y_offset, 0.)) : position;
         return;
     }
     if (!position.allFinite())

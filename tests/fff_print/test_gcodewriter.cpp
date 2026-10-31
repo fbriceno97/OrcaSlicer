@@ -2298,3 +2298,33 @@ TEST_CASE("Initial filament start G-code tolerates a list shorter than the filam
 
     REQUIRE_NOTHROW(Slic3r::Test::gcode(print));
 }
+
+TEST_CASE("Global section transitions exchange macro positions in machine coordinates on other plates", "[GCodeWriter][Nonplanar]")
+{
+    const bool section_motion = GENERATE(false, true);
+    PrintConfig config;
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_xy_offset(100., 200.);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    writer.set_section_motion_limits(section_motion);
+    writer.travel_to_xyz(Vec3d(112., 215., 20.));
+    const Vec3d expected = section_motion ? Vec3d(12., 15., 20.) : Vec3d(112., 215., 20.);
+    CHECK_THAT((writer.position_for_custom_gcode() - expected).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    const Vec3d command(16., 18., 25.);
+    writer.set_position_from_custom_gcode(command);
+    CHECK_THAT((writer.position_for_custom_gcode() - command).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    if (section_motion) {
+        CHECK_THAT((writer.get_position() - Vec3d(116., 218., 25.)).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+        GCodeReader reader;
+        Vec3d emitted = Vec3d::Zero();
+        const std::string output = writer.travel_to_xyz(writer.get_position());
+        reader.parse_buffer(output, [&](GCodeReader &state, const GCodeReader::GCodeLine &line) {
+            if (line.cmd_is("G1"))
+                emitted = Vec3d(line.new_X(state), line.new_Y(state), line.new_Z(state));
+        });
+        CHECK_THAT((emitted - command).norm(), Catch::Matchers::WithinAbs(0., 0.002));
+    } else
+        CHECK_THAT((writer.get_position() - command).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+}
