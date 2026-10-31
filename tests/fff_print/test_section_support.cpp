@@ -230,8 +230,6 @@ TEST_CASE("Tree overhang detection treats an inclined section floor as supportin
     REQUIRE(families.size() == 1);
     PrintObject &child = *families.front().front();
     child.slice();
-    child.make_perimeters();
-    child.prepare_infill();
     TreeSupport tree(child, child.slicing_parameters());
     tree.detect_overhangs();
     // Each growing bottom strip touches the cut face. The cube's vertical

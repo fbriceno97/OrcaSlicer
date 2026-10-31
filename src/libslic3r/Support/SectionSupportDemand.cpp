@@ -3,6 +3,7 @@
 #include "SectionSupportDemand.hpp"
 #include "SegmentSupportBounds.hpp"
 #include "../Print.hpp"
+#include "../PrintBase.hpp"
 #include "../PrintConfig.hpp"
 #include "../Exception.hpp"
 #include "../I18N.hpp"

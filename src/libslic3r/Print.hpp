@@ -563,8 +563,10 @@ public:
     void set_id(size_t id) { m_id = id; }
 
   private:
-    // to be called from Print only.
+    // Pipeline entry points are restricted to Print and its section-family driver.
     friend class Print;
+    friend void generate_section_support_family(const std::vector<PrintObject *> &,
+        const std::function<void()> &);
 
 	PrintObject(Print* print, ModelObject* model_object, const Transform3d& trafo, PrintInstances&& instances);
 	~PrintObject();
