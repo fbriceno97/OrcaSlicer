@@ -1,3 +1,4 @@
+#include "CutPlaneSegmentation.hpp"
 #include "Support/SectionSupportDemand.hpp"
 #include "Support/SegmentSupportBounds.hpp"
 #include "ExPolygon.hpp"

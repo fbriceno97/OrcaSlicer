@@ -1,3 +1,4 @@
+#include <catch2/catch_message.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
@@ -205,12 +206,15 @@ TEST_CASE("A parent generates support for inherited body load and rebuilds it wi
 TEST_CASE("Tree overhang detection treats an inclined section floor as supporting material", "[Nonplanar][Support]")
 {
     const bool free_overhang = GENERATE(false, true);
+    const bool z_anti_aliasing = GENERATE(false, true);
     DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
     config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"enable_support", "1"},
         {"support_type", "tree(auto)"}, {"support_style", "tree_hybrid"},
         {"support_remove_small_overhang", "0"}, {"max_bridge_length", "0"},
         {"layer_height", "0.2"}, {"initial_layer_print_height", "0.2"},
         {"elefant_foot_compensation", "0"}});
+    config.set_deserialize_strict("zaa_enabled", z_anti_aliasing ? "1" : "0");
+    config.set_deserialize_strict("zaa_min_z", "0.02");
     Print print;
     Model model;
     TriangleMesh mesh = Slic3r::Test::cube(20.);
@@ -224,7 +228,7 @@ TEST_CASE("Tree overhang detection treats an inclined section floor as supportin
     object->cut_planes.enabled = true;
     CutPlane plane;
     plane.point = Vec3d(10., 10., 10.);
-    plane.normal = Vec3d(0., 0.2, 1.).normalized();
+    plane.normal = Vec3d(0., 0.05, 1.).normalized();
     plane.has_build_normal = true;
     plane.build_normal = Vec3d::UnitZ();
     object->cut_planes.planes.push_back(plane);

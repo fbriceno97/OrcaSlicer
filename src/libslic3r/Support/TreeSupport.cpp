@@ -990,7 +990,8 @@ void TreeSupport::detect_overhangs(bool check_support_necessity/* = false*/)
                 // A cut face carries the material touching it, just as the bed does.
                 // Only load-bearing floors participate; ceilings cannot support a branch.
                 if (section_floor.is_active()) {
-                    const Polygons floor = section_floor.floor_band(layer->bottom_z(), layer->print_z);
+                    const double lower_sample = lower_layer->slice_z + m_slicing_params.object_print_z_min;
+                    const Polygons floor = section_floor.floor_band(lower_sample, layer->print_z);
                     if (!floor.empty()) {
                         append(effective_lower, union_ex(floor));
                         effective_lower = union_ex(effective_lower);

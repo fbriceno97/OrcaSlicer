@@ -2222,9 +2222,14 @@ SupportGeneratorLayersPtr PrintObjectSupportMaterial::top_contact_layers(
             for (size_t layer_id = range.begin(); layer_id < range.end(); layer_id++) {
                 const Layer& layer = *object.layers()[layer_id];
                 Polygons            lower_layer_polygons = (layer_id == 0) ? Polygons() : to_polygons(object.layers()[layer_id - 1]->lslices);
-                if (section_floor.is_active())
+                if (section_floor.is_active()) {
+                    // Include floor contact emerging after the previous sampling
+                    // plane, including Z anti-aliasing offsets on shallow cuts.
+                    const double lower_sample = layer_id > 0 ?
+                        object.layers()[layer_id - 1]->slice_z + m_slicing_params.object_print_z_min : layer.bottom_z();
                     lower_layer_polygons = union_(lower_layer_polygons,
-                        section_floor.floor_band(layer.print_z - layer.height, layer.print_z));
+                        section_floor.floor_band(lower_sample, layer.print_z));
+                }
 
                 overhangs_per_layers[layer_id] = detect_overhangs(layer, layer_id, lower_layer_polygons, *m_print_config, *m_object_config, annotations, m_support_params.gap_xy
 #ifdef SLIC3R_DEBUG
