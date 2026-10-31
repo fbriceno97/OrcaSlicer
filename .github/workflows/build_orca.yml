@@ -854,7 +854,10 @@ jobs:
       # finish does not, since the directory may be a truncated copy.
       - name: Save compiler cache
         id: ccache_save
-        if: ${{ always() && steps.ccache_restore.outcome == 'success' && github.event_name != 'pull_request' }}
+        # Trusted same-repository experimental PRs also need their compiled
+        # objects retained between failure/fix cycles. External fork PRs keep
+        # the existing read-only cache policy.
+        if: ${{ always() && steps.ccache_restore.outcome == 'success' && (github.event_name != 'pull_request' || (github.repository == 'fbriceno97/OrcaSlicer' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'feature/unlayered-wave-nonplanar')) }}
         uses: actions/cache/save@v6
         with:
           path: ${{ github.workspace }}/.ccache
