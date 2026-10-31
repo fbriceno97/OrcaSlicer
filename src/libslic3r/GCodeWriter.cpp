@@ -59,18 +59,18 @@ bool GCodeWriter::must_skip_lift_now() const
     return (m_section_transform.has_value() || m_kinematics->suppress_lift_at_unknown_position()) && ! this->is_current_position_clear();
 }
 
-double GCodeWriter::section_travel_speed(double requested) const
+double GCodeWriter::section_motion_speed(double requested) const
 {
     if (!m_section_transform)
         return requested;
     double limit = config.travel_speed_z.get_at(m_cached_extruder_idx);
     if (!std::isfinite(requested) || requested <= 0. || !std::isfinite(limit) || limit < 0. ||
         !std::isfinite(m_section_machine_speed_z) || m_section_machine_speed_z < 0.)
-        throw std::invalid_argument("Invalid section travel speed limit");
+        throw std::invalid_argument("Invalid section motion speed limit");
     if (m_section_machine_speed_z > 0.)
         limit = limit > 0. ? std::min(limit, m_section_machine_speed_z) : m_section_machine_speed_z;
     if (limit <= 0.)
-        throw std::invalid_argument("Section travel requires a configured physical Z speed limit");
+        throw std::invalid_argument("Section motion requires a configured physical Z speed limit");
     return std::min(requested, limit);
 }
 
@@ -952,7 +952,8 @@ void GCodeWriter::set_speed(std::string &out, double F, const std::string &comme
 {
     assert(F > 0.);
     assert(F < 100000.);
-    
+    if (m_section_transform)
+        F = section_motion_speed(F / 60.) * 60.;
     m_current_speed = F;
     GCodeG1Formatter w;
     w.emit_f(F);
@@ -966,7 +967,7 @@ std::string GCodeWriter::travel_to_xy(const Vec2d &point, const std::string &com
 {
     // Validate mapped speed before changing the remembered position.
     Vec2d point_on_plate = { point(0) - m_x_offset, point(1) - m_y_offset };
-    const double speed = section_travel_speed(this->point_on_first_layer(Vec3d(point_on_plate.x(), point_on_plate.y(), m_pos.z()))
+    const double speed = section_motion_speed(this->point_on_first_layer(Vec3d(point_on_plate.x(), point_on_plate.y(), m_pos.z()))
         ? this->config.get_abs_value_at("initial_layer_travel_speed", m_cached_extruder_idx) : this->config.travel_speed.get_at(m_cached_extruder_idx));
     m_pos(0) = point(0);
     m_pos(1) = point(1);
@@ -1083,10 +1084,10 @@ std::string GCodeWriter::travel_to_xyz(const Vec3d &point, const std::string &co
     Vec3d dest_point = point;
     auto travel_speed =
         this->point_on_first_layer(Vec3d(point.x() - m_x_offset, point.y() - m_y_offset, point.z())) ? this->config.get_abs_value_at("initial_layer_travel_speed", m_cached_extruder_idx) : this->config.travel_speed.get_at(m_cached_extruder_idx);
-    travel_speed = section_travel_speed(travel_speed);
+    travel_speed = section_motion_speed(travel_speed);
     // See uses_pointwise_travel_speed(): the historical path deliberately emits the
     // raw configured speed in the final branch below, ignoring travel_speed.
-    const double final_travel_speed = section_travel_speed(this->uses_pointwise_travel_speed()
+    const double final_travel_speed = section_motion_speed(this->uses_pointwise_travel_speed()
         ? travel_speed
         : this->config.travel_speed.get_at(m_cached_extruder_idx));
     //BBS: a z_hop need to be handle when travel
@@ -1260,7 +1261,7 @@ std::string GCodeWriter::_travel_to_z(double z, const std::string &comment)
                     : this->config.travel_speed.get_at(m_cached_extruder_idx);
     }
 
-    speed = section_travel_speed(speed);
+    speed = section_motion_speed(speed);
     m_pos(2) = z;
 
     GCodeG1Formatter w;

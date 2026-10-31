@@ -216,8 +216,8 @@ protected:
     // stored logical X/Y and that position is not yet known.
     bool must_skip_lift_now() const;
     // Conservative until direction-aware section feed planning is installed:
-    // any local travel can contain physical Z motion.
-    double section_travel_speed(double requested) const;
+    // any local XYZ motion can contain physical Z motion.
+    double section_motion_speed(double requested) const;
 
     // True when travel speed is selected per destination point rather than per
     // layer. Set for writers that install a first-layer point test. The

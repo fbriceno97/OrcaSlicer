@@ -221,6 +221,39 @@ TEST_CASE("Section travel respects configured physical Z speed on every mapped a
     CHECK(feedrates > 0);
 }
 
+TEST_CASE("Section extrusion feed and cached wipe speed share the physical Z cap", "[GCodeWriter][Nonplanar]")
+{
+    const bool section = GENERATE(false, true);
+    const double requested = GENERATE(2., 200.);
+    PrintConfig config;
+    config.travel_speed_z.values = {4.};
+    config.machine_max_speed_z.values = {8., 8.};
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    if (section) {
+        Transform3d frame = Transform3d::Identity();
+        frame.rotate(Eigen::AngleAxisd(Geometry::deg2rad(45.), Vec3d::UnitX()));
+        writer.set_section_transform(frame);
+    }
+    const double expected = (section ? std::min(requested, 4.) : requested) * 60.;
+    const std::string output = writer.set_speed(requested * 60.);
+    CHECK_THAT(writer.get_current_speed(), Catch::Matchers::WithinAbs(expected, 1e-6));
+    size_t feedrates = 0;
+    GCodeReader reader;
+    reader.parse_buffer(output, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
+        if (line.has(F)) {
+            CHECK_THAT(line.f(), Catch::Matchers::WithinAbs(expected, 0.001));
+            ++feedrates;
+        }
+    });
+    CHECK(feedrates == 1);
+    writer.set_section_transform(std::nullopt);
+    writer.set_speed(requested * 60.);
+    CHECK_THAT(writer.get_current_speed(), Catch::Matchers::WithinAbs(requested * 60., 1e-6));
+}
+
 TEST_CASE("Section travel requires an explicit Z limit when the machine limit is unset", "[GCodeWriter][Nonplanar]")
 {
     PrintConfig config;
