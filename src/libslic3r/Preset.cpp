@@ -1342,6 +1342,10 @@ static std::vector<std::string> s_Preset_print_options{
     "infill_combination_max_layer_height", /*"adaptive_layer_height",*/
     "support_bottom_interface_spacing",
     "enable_overhang_speed",
+    "wave_overhangs",
+    "wave_overhang_speed",
+    "wave_overhang_line_spacing",
+    "wave_overhang_fan_speed",
     "slowdown_for_curled_perimeters",
     "overhang_1_4_speed",
     "overhang_2_4_speed",

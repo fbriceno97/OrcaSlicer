@@ -103,7 +103,7 @@ TEST_CASE("Section and build-axis metadata follow the emitted moves", "[GCodePro
 TEST_CASE("Section travel retains physical Z during the custom start stage", "[GCodeProcessor][Nonplanar]")
 {
     GCodeProcessor processor;
-    process_text(processor, "G90\n;TYPE:Custom\n;SEGMENT_ID:0\nG1 X10 Y10 Z20 F1200\n");
+    process_text(processor, "G90\n; FEATURE: Custom\n;SEGMENT_ID:0\nG1 X10 Y10 Z20 F1200\n");
     REQUIRE(processor.get_result().nonplanar_metadata_valid);
     float maximum_z = 0.f;
     for (const auto &move : processor.get_result().moves)
@@ -123,6 +123,15 @@ TEST_CASE("Collision processing retains unannotated preparation travel at its ph
     CHECK_THAT(maximum_z, WithinAbs(20.f, 1e-6f));
 }
 
+TEST_CASE("Fresh and reset motion results have neutral Z calibration", "[GCodeProcessor][Nonplanar]")
+{
+    GCodeProcessorResult result;
+    CHECK(result.z_offset == 0.f);
+    result.z_offset = 12.f;
+    result.reset();
+    CHECK(result.z_offset == 0.f);
+}
+
 TEST_CASE("Preparation display height changes only when physical processing is requested", "[GCodeProcessor][Nonplanar]")
 {
     const bool preserve = GENERATE(false, true);
@@ -132,7 +141,7 @@ TEST_CASE("Preparation display height changes only when physical processing is r
     processor.apply_config(config);
     processor.preserve_preparation_z(preserve);
     processor.initialize_result_moves();
-    processor.process_buffer("G90\n;TYPE:Custom\nG1 X10 Y10 Z20 F1200\n");
+    processor.process_buffer("G90\n; FEATURE: Custom\nG1 X10 Y10 Z20 F1200\n");
     processor.finalize(false);
     float maximum_z = 0.f;
     for (const auto &move : processor.get_result().moves)

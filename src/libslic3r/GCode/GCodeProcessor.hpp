@@ -338,7 +338,7 @@ inline constexpr float DEFAULT_FILAMENT_DENSITY = 1.245f;
         int timelapse_warning_code {0};
         bool support_traditional_timelapse{true};
         float printable_height;
-        float z_offset;
+        float z_offset{ 0.f };
         // Belt printer: physical tilt magnitude (deg) parsed from the slicing-rotation
         // header comment; used to enable the preview's belt view.
         float belt_tilt_angle{ 0.f };

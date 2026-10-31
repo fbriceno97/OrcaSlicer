@@ -2606,6 +2606,7 @@ void GCodeProcessorResult::reset() {
     long_retraction_when_cut = false;
     timelapse_warning_code = 0;
     printable_height = 0.0f;
+    z_offset = 0.f;
     machine_frame_transform_active = false;
     belt_tilt_angle = 0.f;
     belt_z_origin   = 0.f;
