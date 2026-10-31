@@ -3910,6 +3910,18 @@ void Print::validate_nonplanar_gcode(const GCodeProcessorResult &result) const
         return;
     if (!result.nonplanar_metadata_valid)
         throw SlicingError(_u8L("Non-planar G-code contains invalid section or build-direction metadata."));
+    // Preview removes Z calibration from stored positions. Restore it when
+    // checking actual section motion against the printer's vertical limits.
+    // Untagged start/end macros may include firmware-managed homing moves;
+    // this check covers explicitly generated section extrusion and travel.
+    for (const auto &move : result.moves) {
+        if (move.cut_segment_id < 0 || (move.type != EMoveType::Extrude && move.type != EMoveType::Travel))
+            continue;
+        const double machine_z = double(move.position.z()) + result.z_offset;
+        if (!std::isfinite(machine_z) || machine_z < -EPSILON ||
+            machine_z > m_config.printable_height.value + EPSILON)
+            throw SlicingError(_u8L("Non-planar section motion exceeds the printer's vertical travel limits."));
+    }
     HotendCollisionParams params;
     params.throw_on_cancel = [this]() { throw_if_canceled(); };
     params.envelope = HotendEnvelope::from_config(m_config);

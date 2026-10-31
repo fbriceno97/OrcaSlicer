@@ -74,3 +74,8 @@ With non-planar validation enabled, unannotated XYZ motion also receives the
 chronological upright-nozzle check. Removing section comments during
 post-processing cannot turn off clearance validation. Ordinary printing with the
 experimental option disabled retains its existing export path.
+
+Annotated section extrusion and travel must stay within physical Z travel limits.
+The check restores the calibration removed from preview positions before testing
+the bed and printable-height bounds. Untagged firmware-managed start/end motion
+is outside this section-specific limit check.

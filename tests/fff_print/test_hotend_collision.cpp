@@ -158,6 +158,26 @@ TEST_CASE("The export gate rejects colliding sections and disabled envelopes whi
     CHECK_NOTHROW(print.validate_nonplanar_gcode(result));
 }
 
+TEST_CASE("Section travel respects physical Z limits including calibration", "[HotendCollision][Print]")
+{
+    Print print;
+    Model model;
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"printable_height", "30"}});
+    Slic3r::Test::init_print({Slic3r::Test::cube(8.)}, print, model, config);
+    GCodeProcessorResult result;
+    sample_sections(result, true, false);
+    CHECK_NOTHROW(print.validate_nonplanar_gcode(result));
+    result.z_offset = 0.2f;
+    CHECK_THROWS_AS(print.validate_nonplanar_gcode(result), SlicingError);
+    result.z_offset = 0.;
+    result.moves.back().position.z() = -0.1f;
+    CHECK_THROWS_AS(print.validate_nonplanar_gcode(result), SlicingError);
+    config.set_deserialize_strict("enable_nonplanar", "0");
+    print.apply(model, config);
+    CHECK_NOTHROW(print.validate_nonplanar_gcode(result));
+}
+
 TEST_CASE("Rejected non-planar exports leave neither printable output nor a temporary file", "[HotendCollision][Print]")
 {
     const bool preview_requested = GENERATE(false, true);
