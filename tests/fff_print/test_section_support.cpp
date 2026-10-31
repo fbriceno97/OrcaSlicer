@@ -201,6 +201,7 @@ TEST_CASE("A parent generates support for inherited body load and rebuilds it wi
 
 TEST_CASE("Tree overhang detection treats an inclined section floor as supporting material", "[Nonplanar][Support]")
 {
+    const bool free_overhang = GENERATE(false, true);
     DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
     config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"enable_support", "1"},
         {"support_type", "tree(auto)"}, {"support_style", "tree_hybrid"},
@@ -209,7 +210,13 @@ TEST_CASE("Tree overhang detection treats an inclined section floor as supportin
         {"elefant_foot_compensation", "0"}});
     Print print;
     Model model;
-    Slic3r::Test::init_print({Slic3r::Test::cube(20.)}, print, model, config);
+    TriangleMesh mesh = Slic3r::Test::cube(20.);
+    if (free_overhang) {
+        TriangleMesh cap = make_cube(40., 20., 2.);
+        cap.translate(0.f, 0.f, 18.f);
+        mesh.merge(cap);
+    }
+    Slic3r::Test::init_print({mesh}, print, model, config);
     ModelObject *object = model.objects.front();
     object->cut_planes.enabled = true;
     CutPlane plane;
@@ -229,8 +236,14 @@ TEST_CASE("Tree overhang detection treats an inclined section floor as supportin
     tree.detect_overhangs();
     // Each growing bottom strip touches the cut face. The cube's vertical
     // walls above it need no support either, even with small-island pruning off.
+    size_t overhang_layers = 0;
     for (const Layer *layer : child.layers()) {
         INFO("section layer at " << layer->print_z);
-        CHECK(layer->loverhangs.empty());
+        if (!layer->loverhangs.empty())
+            ++overhang_layers;
+        if (!free_overhang)
+            CHECK(layer->loverhangs.empty());
     }
+    if (free_overhang)
+        CHECK(overhang_layers > 0);
 }
