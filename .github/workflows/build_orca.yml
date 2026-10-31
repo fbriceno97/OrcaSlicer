@@ -43,8 +43,20 @@ jobs:
           lfs: 'false'
 
       - name: load cached deps
+        id: deps_restore
         if: ${{ !(runner.os == 'macOS' && inputs.macos-combine-only) }}
-        uses: actions/cache@v6
+        continue-on-error: ${{ runner.os == 'Windows' && github.repository == 'fbriceno97/OrcaSlicer' && (github.head_ref == 'feature/unlayered-wave-nonplanar' || github.ref_name == 'feature/unlayered-wave-nonplanar') }}
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ github.workspace }}/${{ inputs.cache-path }}
+          key: ${{ inputs.cache-key }}
+          fail-on-cache-miss: true
+
+      # A transient storage egress throttle is not a missing dependency cache.
+      # Retry once; a second failure still stops the build before compilation.
+      - name: Retry Windows dependency cache restore
+        if: ${{ steps.deps_restore.outcome == 'failure' && runner.os == 'Windows' && github.repository == 'fbriceno97/OrcaSlicer' && (github.head_ref == 'feature/unlayered-wave-nonplanar' || github.ref_name == 'feature/unlayered-wave-nonplanar') }}
+        uses: actions/cache/restore@v6
         with:
           path: ${{ github.workspace }}/${{ inputs.cache-path }}
           key: ${{ inputs.cache-key }}
