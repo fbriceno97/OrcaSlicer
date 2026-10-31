@@ -3,6 +3,7 @@
 #include "Circle.hpp"
 #include "Config.hpp"
 #include "GCode/GCodeProcessor.hpp"
+#include "GCode/SectionFrame.hpp"
 #include "Flow.hpp"
 #include "GCode/ThumbnailData.hpp"
 #include "GCode/ToolOrdering.hpp"
@@ -3032,7 +3033,7 @@ namespace DoExport {
         processor.initialize_from_context(nozzle_group_result);
         processor.initialize_result_moves();
         processor.apply_config(config);
-        processor.preserve_preparation_z(print.config().enable_nonplanar.value);
+        processor.preserve_preparation_z(config.enable_nonplanar.value);
         processor.enable_stealth_time_estimator(silent_time_estimator_enabled);
     }
 
@@ -4612,8 +4613,20 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
                     file.writeln(printing_by_object_gcode);
                 }
                 // Reset the cooling buffer internal state (the current position, feed rate, accelerations).
+                // Print's export guard remains until section transitions, layer
+                // semantics and support propagation are fully integrated.
+                const bool section_frame = object.segment().has_value();
+                ScopeGuard reset_section([this, section_frame]() {
+                    if (section_frame)
+                        m_writer.set_section_transform(std::nullopt);
+                });
+                file.write(begin_section_frame(**print_object_instance_sequential_active, m_origin, m_writer));
+                if (section_frame) {
+                    m_last_pos_defined = false;
+                    m_wipe.reset_path();
+                }
                 m_cooling_buffer->set_current_extruder(initial_extruder_id, get_extruder_id(initial_extruder_id));
-                m_cooling_buffer->reset(this->writer().get_position());
+                m_cooling_buffer->reset(section_frame ? m_writer.position_for_custom_gcode() : m_writer.get_position());
                 // The belt first-layer band is tracked per object as well: if the previous
                 // object ended inside the band, this one has to open its own.
                 m_belt_in_band = false;
@@ -4624,6 +4637,13 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
                 m_printed_objects.emplace_back(&object);
                 this->process_layers(print, tool_ordering, collect_layers_to_print(object, print.config().belt_printer.value), *print_object_instance_sequential_active - object.instances().data(), file,
                                      prime_extruder);
+                if (section_frame) {
+                    if (m_fan_mover)
+                        file.write(m_fan_mover->process_gcode("", true));
+                    file.write(end_section_frame(m_writer));
+                    m_last_pos_defined = false;
+                    m_wipe.reset_path();
+                }
                 {
                     // save the flush statitics stored in tool ordering by object
                     print.m_statistics_by_extruder_count.stats_by_single_extruder += tool_ordering.get_filament_change_stats(ToolOrdering::FilamentChangeMode::SingleExt);

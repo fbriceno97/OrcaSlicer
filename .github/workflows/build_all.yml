@@ -104,7 +104,8 @@ jobs:
             @{ Label = 'Cut-plane GUI compiled'; File = 'src/slic3r/CMakeLists.txt'; Pattern = 'GLGizmoCutPlanes\.cpp' },
             @{ Label = 'Collision check compiled'; File = 'src/libslic3r/CMakeLists.txt'; Pattern = 'HotendCollisionCheck\.cpp' },
             @{ Label = 'Cut-plane slicing orchestration'; File = 'src/libslic3r/PrintApply.cpp'; Pattern = 'derive_cut_segments\(' },
-            @{ Label = 'Section G-code emission'; File = 'src/libslic3r/GCode.cpp'; Pattern = 'SEGMENT_ID|ETags::Segment_Id' },
+            @{ Label = 'Section G-code frame scope'; File = 'src/libslic3r/GCode.cpp'; Pattern = 'begin_section_frame\(' },
+            @{ Label = 'Section frame binding compiled'; File = 'src/libslic3r/CMakeLists.txt'; Pattern = 'GCode[/\\]SectionFrame\.cpp' },
             @{ Label = 'Collision enforcement at export'; File = 'src/libslic3r/Print.cpp'; Pattern = 'check_hotend_collisions\(' }
           )
           $missing = 0
@@ -116,8 +117,12 @@ jobs:
               $missing++
             }
           }
+          if ((Get-Content -Raw 'src/libslic3r/Print.cpp') -match 'unsupported_nonplanar_object\(\*this\)\s*!=\s*nullptr') {
+            Write-Host '::error title=Section export remains guarded::Frame binding is insufficient: transitions, support and end-to-end validation must be completed before export is enabled.'
+            $missing++
+          }
           if ($missing -gt 0) {
-            Write-Host "::error::Unlayered source files were staged but are not yet connected to the slicer."
+            Write-Host "::error::Section integration or export readiness is incomplete."
             exit 1
           }
           Write-Host 'Source wiring present. Real G-code and Bambu printer safety validation still REQUIRED.'

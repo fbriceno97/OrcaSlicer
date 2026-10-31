@@ -67,7 +67,12 @@ clipping inactive. Parent support-demand propagation and the separate classic
 tree-support path still require integration before section export can be enabled.
 
 Derived sections are rejected by print validation, processing, and export while
-machine-space section emission is unavailable. This includes explicitly directed
+safe section transitions and support propagation remain incomplete. A sequential
+export scope binds the per-copy frame, writes unique section/build-axis metadata,
+resets cooling in physical coordinates and closes the frame before global motion.
+Exception cleanup restores the ordinary writer frame. This scope remains behind
+the export guard; frame binding alone does not establish complete motion safety
+or correct section-layer settings. This includes explicitly directed
 parts with zero rotation: their rebased layer schedules still require section
 emission. The guard prevents a project from silently producing ordinary planar
 G-code for these descriptors.

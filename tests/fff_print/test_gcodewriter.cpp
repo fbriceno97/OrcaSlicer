@@ -41,6 +41,7 @@
 #include "test_helpers.hpp"
 #include <cmath>
 #include "libslic3r/GCode/GCodeProcessor.hpp"
+#include "libslic3r/GCode/SectionFrame.hpp"
 #include <algorithm>
 #include <limits>
 #include "libslic3r/GCode/BeltKinematics.hpp"
@@ -84,6 +85,7 @@ TEST_CASE("Section XYZ motion restores each scaled and mirrored copy without rot
     writer_config.z_offset.value = 0.2;
     const Vec3d plate(100., 200., 0.);
     const Vec3d calibration(-3., -5., 0.2);
+    int section_id = 0;
     for (const PrintObject *section : print.objects()) {
         REQUIRE(section->segment().has_value());
         REQUIRE(section->instances().size() == 1);
@@ -93,15 +95,18 @@ TEST_CASE("Section XYZ motion restores each scaled and mirrored copy without rot
         CHECK_THAT((to_world.linear().transpose() * to_world.linear() - Matrix3d::Identity()).norm(),
             Catch::Matchers::WithinAbs(0., 1e-9));
 
-        GCodeWriter writer;
-        writer.apply_print_config(writer_config);
+        GCode generator;
+        generator.apply_print_config(writer_config);
+        GCodeWriter &writer = generator.writer();
         writer.set_xy_offset(plate.x(), plate.y());
         writer.set_extruders({0});
         writer.set_extruder(0);
         // point_to_gcode() adds the instance's origin before handing XY to
         // the writer; it must be removed before undoing the slicing frame.
         const Vec3d origin(unscale<double>(instance.shift.x()), unscale<double>(instance.shift.y()), 0.);
-        writer.set_section_transform(to_world * Eigen::Translation3d(-origin));
+        generator.set_origin(origin.head<2>());
+        std::string program = "G90\nT0\n" + begin_section_frame(instance, generator.origin(), writer);
+        CHECK_THROWS_AS(begin_section_frame(instance, generator.origin(), writer), std::logic_error);
         for (const Vec3d &local : {Vec3d(2., 3., 4.), Vec3d(15., 17., 18.)}) {
             const Vec3d sliced = section->trafo_sliced() * local;
             // Independently place the original model point, then compensate
@@ -114,13 +119,41 @@ TEST_CASE("Section XYZ motion restores each scaled and mirrored copy without rot
             expected += calibration - plate;
             GCodeReader reader;
             Vec3d emitted = Vec3d::Zero();
-            reader.parse_buffer(writer.travel_to_xyz(sliced + origin + calibration),
+            const Vec2d xy = generator.point_to_gcode(Point::new_scale(sliced.x(), sliced.y()));
+            const std::string motion = writer.travel_to_xyz(Vec3d(xy.x(), xy.y(), sliced.z() + writer_config.z_offset.value));
+            program += motion;
+            reader.parse_buffer(motion,
                 [&](GCodeReader &state, const GCodeReader::GCodeLine &line) {
                     if (line.cmd_is("G1"))
                         emitted = Vec3d(line.new_X(state), line.new_Y(state), line.new_Z(state));
                 });
             CHECK_THAT((emitted - expected).norm(), Catch::Matchers::WithinAbs(0., 0.002));
         }
+        program += end_section_frame(writer);
+        CHECK_FALSE(writer.has_section_transform());
+        CHECK(end_section_frame(writer).empty());
+        program += writer.travel_to_xyz(writer.get_position() + Vec3d(1., 0., 0.));
+        GCodeProcessor processor;
+        processor.apply_config(writer_config);
+        processor.initialize_result_moves();
+        processor.process_buffer(program);
+        processor.finalize(false);
+        const auto &result = processor.get_result();
+        CHECK(result.nonplanar_metadata_valid);
+        size_t body_moves = 0;
+        for (const auto &move : result.moves) {
+            if (move.type != EMoveType::Travel || move.cut_segment_id < 0)
+                continue;
+            CHECK(move.cut_segment_id == section_id);
+            REQUIRE(move.tool_axis_id < result.tool_axes.size());
+            CHECK_THAT((result.tool_axes[move.tool_axis_id].cast<double>() - to_world.linear().col(2)).norm(),
+                Catch::Matchers::WithinAbs(0., 2e-6));
+            ++body_moves;
+        }
+        CHECK(body_moves > 0);
+        REQUIRE_FALSE(result.moves.empty());
+        CHECK(result.moves.back().cut_segment_id == -1);
+        ++section_id;
     }
 }
 

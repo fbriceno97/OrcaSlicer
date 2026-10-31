@@ -278,6 +278,8 @@ set(lisbslic3r_sources
     GCode/GCodeProcessor.cpp
     GCode/GCodeProcessor.hpp
     GCode/HotendCollisionCheck.cpp
+    GCode/SectionFrame.cpp
+    GCode/SectionFrame.hpp
     GCode/HotendCollisionCheck.hpp
     GCode/TrunnionAC.cpp
     GCode/TrunnionAC.hpp
