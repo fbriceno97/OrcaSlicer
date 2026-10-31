@@ -28,6 +28,8 @@ class CoolingBuffer {
 public:
     CoolingBuffer(GCode &gcodegen);
     void        reset(const Vec3d &position);
+    // Elevated sections use ordinary cooling without restarting bed-layer gates.
+    void        set_bed_layer_schedule(bool enabled) { m_bed_layer_schedule = enabled; }
     void        set_current_extruder(unsigned int extruder_id, unsigned int nozzle_id) { m_current_extruder = extruder_id; m_current_nozzle = nozzle_id; }
     std::string process_layer(std::string &&gcode, size_t layer_id, bool flush);
 
@@ -66,6 +68,7 @@ private:
     // Belt printers: the extrusion being processed lies in the first-layer band above the
     // belt (between a ";_BELT_BAND_START" and a ";_BELT_BAND_END"). Kept across layers.
     bool                        m_belt_band_active = false;
+    bool                        m_bed_layer_schedule = true;
 };
 
 }

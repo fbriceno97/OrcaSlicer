@@ -133,8 +133,13 @@ first-layer settings use the section point's physical bed height; elevated child
 sections do not restart the bed speed ramp. The exporter resets local layer
 height caches at section boundaries and uses actual section-row thicknesses.
 Elevated children retain normal temperatures and skip the physical next-object
-adhesion macro; upright bed roots retain its normal behavior. Cooling,
-raft and skirt/brim scheduling still need production-export integration.
+adhesion macro; upright bed roots retain its normal behavior. Their cooling
+schedule also bypasses initial bed fan overrides, fan-off periods and fan ramps,
+while keeping each local layer's filament-variant configuration. Wave fan
+controls remain available on elevated sections. Legacy last-Z-only macro fallbacks
+are skipped inside sections because full endpoint parsing already tracks relative
+motion and unit changes. Raft and skirt/brim scheduling still need
+production-export integration.
 This scope remains behind
 the export guard; frame binding alone does not establish complete motion safety
 or correct section-layer settings. This includes explicitly directed

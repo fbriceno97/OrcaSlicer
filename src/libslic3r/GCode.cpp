@@ -1454,7 +1454,8 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
                 gcodegen.writer().set_current_position_clear(false);
                 // BBS: check whether custom gcode changes the z position. Update if changed
                 double temp_z_after_tool_change;
-                if (GCodeProcessor::get_last_z_from_gcode(toolchange_gcode_str, temp_z_after_tool_change)) {
+                if (!gcodegen.writer().has_section_transform() &&
+                    GCodeProcessor::get_last_z_from_gcode(toolchange_gcode_str, temp_z_after_tool_change)) {
                     Vec3d pos = gcodegen.writer().position_for_custom_gcode();
                     pos(2)    = temp_z_after_tool_change;
                     gcodegen.update_position_from_custom_gcode(pos);
@@ -4701,6 +4702,10 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
                     m_wipe.reset_path();
                 }
                 m_cooling_buffer->set_current_extruder(initial_extruder_id, get_extruder_id(initial_extruder_id));
+                const auto &cooling_section = object.segment();
+                m_cooling_buffer->set_bed_layer_schedule(!cooling_section ||
+                    (cooling_section->is_root() && cooling_section->root_builds_up &&
+                        std::abs(cooling_section->slice_z_base()) < EPSILON));
                 m_cooling_buffer->reset(section_frame ? m_writer.position_for_custom_gcode() : m_writer.get_position());
                 // The belt first-layer band is tracked per object as well: if the previous
                 // object ended inside the band, this one has to open its own.
@@ -6518,7 +6523,8 @@ std::string GCode::generate_timelapse_gcode(const Print &print, coordf_t print_z
         m_writer.set_current_position_clear(false);
 
         double temp_z_after_tool_change;
-        if (GCodeProcessor::get_last_z_from_gcode(timelapse_gcode, temp_z_after_tool_change)) {
+        if (!m_writer.has_section_transform() &&
+            GCodeProcessor::get_last_z_from_gcode(timelapse_gcode, temp_z_after_tool_change)) {
             Vec3d pos = m_writer.position_for_custom_gcode();
             pos(2)    = temp_z_after_tool_change;
             update_position_from_custom_gcode(pos);
@@ -7467,7 +7473,8 @@ LayerResult GCode::process_layer(
         m_writer.set_current_position_clear(false);
 
         double temp_z_after_tool_change;
-        if (GCodeProcessor::get_last_z_from_gcode(wrapping_gcode, temp_z_after_tool_change)) {
+        if (!m_writer.has_section_transform() &&
+            GCodeProcessor::get_last_z_from_gcode(wrapping_gcode, temp_z_after_tool_change)) {
             Vec3d pos = m_writer.position_for_custom_gcode();
             pos(2)    = temp_z_after_tool_change;
             update_position_from_custom_gcode(pos);
@@ -11153,7 +11160,8 @@ std::string GCode::set_extruder(unsigned int new_filament_id, double print_z, bo
             m_writer.set_current_position_clear(false);
             //BBS: check whether custom gcode changes the z position. Update if changed
             double temp_z_after_tool_change;
-            if (GCodeProcessor::get_last_z_from_gcode(toolchange_gcode_parsed, temp_z_after_tool_change)) {
+            if (!m_writer.has_section_transform() &&
+                GCodeProcessor::get_last_z_from_gcode(toolchange_gcode_parsed, temp_z_after_tool_change)) {
                 Vec3d pos = m_writer.position_for_custom_gcode();
                 pos(2) = temp_z_after_tool_change;
                 update_position_from_custom_gcode(pos);

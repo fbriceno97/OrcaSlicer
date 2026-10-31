@@ -805,8 +805,9 @@ std::string CoolingBuffer::apply_layer_cooldown(
         // value >= 0, layer 0 emits exactly that percentage so the entire first layer
         // is at one stable fan speed. The override wins over the `close_fan_the_first_x_layers` gate when
         // layer_id == 0. From layer 1 onwards the regular logic resumes. 
-        wave_fan_allowed = int(layer_id) >= close_fan_the_first_x_layers && !(has_initial_layer_override && layer_id == 0);
-        if (has_initial_layer_override && layer_id == 0) {
+        wave_fan_allowed = !m_bed_layer_schedule || (int(layer_id) >= close_fan_the_first_x_layers &&
+            !(has_initial_layer_override && layer_id == 0));
+        if (m_bed_layer_schedule && has_initial_layer_override && layer_id == 0) {
             fan_speed_new             = initial_layer_fan_speed;
             overhang_fan_speed        = initial_layer_fan_speed;
             overhang_fan_control      = false;
@@ -818,7 +819,7 @@ std::string CoolingBuffer::apply_layer_cooldown(
             ironing_fan_control         = false;
             // additional_fan_speed_new is left at its configured value (auxiliary fan is independent of the
             // part-cooling override).
-        } else if (int(layer_id) >= close_fan_the_first_x_layers) {
+        } else if (!m_bed_layer_schedule || int(layer_id) >= close_fan_the_first_x_layers) {
             float   fan_max_speed             = m_config.fan_max_speed.get_at(config_index);
             float slow_down_layer_time = float(EXTRUDER_CONFIG(slow_down_layer_time));
             float fan_cooling_layer_time      = float(EXTRUDER_CONFIG(fan_cooling_layer_time));
@@ -835,7 +836,7 @@ std::string CoolingBuffer::apply_layer_cooldown(
                 }
             //}
             overhang_fan_speed   = EXTRUDER_CONFIG(overhang_fan_speed);
-            if (int(layer_id) >= close_fan_the_first_x_layers && int(layer_id) + 1 < full_fan_speed_layer) {
+            if (m_bed_layer_schedule && int(layer_id) >= close_fan_the_first_x_layers && int(layer_id) + 1 < full_fan_speed_layer) {
                 if (has_initial_layer_override && close_fan_the_first_x_layers == 0 && full_fan_speed_layer > 1) {
                     // ORCA: Option-B anchored ramp. When the first-layer override is configured and there's
                     // no "no cooling" gate, the ramp interpolates linearly from `initial_layer_fan_speed` on
