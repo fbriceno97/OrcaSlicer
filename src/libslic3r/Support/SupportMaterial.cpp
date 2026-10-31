@@ -2214,6 +2214,7 @@ SupportGeneratorLayersPtr PrintObjectSupportMaterial::top_contact_layers(
     contact_out.assign(num_layers * 2, nullptr);
 
     std::vector<ExPolygons> overhangs_per_layers(num_layers);
+    std::vector<Polygons> inherited_contacts(num_layers);
     const SegmentSupportBounds section_floor(object);
     size_t layer_id_start = this->has_raft() ? 0 : 1;
      // main part of overhang detection can be parallel
@@ -2437,6 +2438,7 @@ SupportGeneratorLayersPtr PrintObjectSupportMaterial::top_contact_layers(
             while (target_layer + 1 < num_layers && contact_height(target_layer + 1) <= target + EPSILON)
                 ++target_layer;
             append(overhangs_per_layers[target_layer], union_ex(fresh));
+            polygons_append(inherited_contacts[target_layer], fresh);
         }
     }
 
@@ -2452,6 +2454,12 @@ SupportGeneratorLayersPtr PrintObjectSupportMaterial::top_contact_layers(
                 , iRun
 #endif // SLIC3R_DEBUG
             );
+
+        // Virtual contact rows have no model polygons for detect_contacts()
+        // to intersect. Preserve their inherited roof instead of leaving only
+        // the lower base/interface layers to carry the load.
+        if (!inherited_contacts[layer_id].empty())
+            contact_polygons = union_(contact_polygons, inherited_contacts[layer_id]);
 
         // Now apply the contact areas to the layer where they need to be made.
         if (!contact_polygons.empty() || !overhang_polygons.empty()) {
