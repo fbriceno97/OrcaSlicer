@@ -77,6 +77,13 @@ parts with zero rotation: their rebased layer schedules still require section
 emission. The guard prevents a project from silently producing ordinary planar
 G-code for these descriptors.
 
+Sequential staging tracks the calibrated height of actual deposited moves,
+including positive-extrusion wipes, instead of a section's rebased local maximum.
+The horizontal transfer uses at least 1 mm above this height (or the profile's
+larger Z hop), and rejects a staging height beyond the printer's vertical limit.
+The final collision check remains necessary for ascent/descent and other motion;
+these staging components do not remove the section export guard.
+
 G-code processing separately retains section IDs and normalized build directions.
 Reloading moves also reloads their direction palette. Annotated section travel
 retains its physical Z even during a custom start stage,

@@ -75,8 +75,10 @@ using namespace Slic3r::Test;
 
 TEST_CASE("Disabled non-planar mode preserves ordinary motion despite stored cut planes", "[Print][CutPlaneSegmentation]")
 {
+    const bool sequential = GENERATE(false, true);
     DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
-    config.set_deserialize_strict({{"layer_change_gcode", "G92 E0"}, {"enable_nonplanar", "0"}});
+    config.set_deserialize_strict({{"layer_change_gcode", "G92 E0"}, {"enable_nonplanar", "0"},
+        {"print_sequence", sequential ? "by object" : "by layer"}});
     Print normal;
     Model model;
     init_print({cube(8.)}, normal, model, config);

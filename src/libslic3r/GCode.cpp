@@ -4548,11 +4548,21 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
 
         // Do all objects for each layer.
         if (print.config().print_sequence == PrintSequence::ByObject && !has_wipe_tower) {
+            const auto objects = print.objects();
+            const bool has_sections = std::any_of(objects.begin(), objects.end(), [](const PrintObject *object) {
+                return object->segment().has_value();
+            });
+            if (has_sections && m_fan_mover)
+                file.write(m_fan_mover->process_gcode("", true));
+            if (has_sections)
+                m_max_layer_z = static_cast<float>(max_printed_machine_z(m_processor.get_result(), 0, 0., m_config.z_offset.value));
             size_t finished_objects = 0;
             print_object_instance_sequential_active = first_has_extrude_print_object;
             const PrintObject *prev_object = (*print_object_instance_sequential_active)->print_object;
             for (; print_object_instance_sequential_active != print_object_instances_ordering.end(); ++ print_object_instance_sequential_active) {
                 const PrintObject &object = *(*print_object_instance_sequential_active)->print_object;
+                const size_t object_moves_begin = m_processor.get_result().moves.size();
+                const double previous_world_maximum = m_max_layer_z;
                 if (&object != prev_object || tool_ordering.first_extruder() != final_extruder_id) {
                     auto cached_ordering = use_seq_dynamic_cache ? seq_dynamic_orderings.find(&object) : seq_dynamic_orderings.end();
                     if (cached_ordering != seq_dynamic_orderings.end()) {
@@ -4597,7 +4607,15 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
                     } else {
                         file.write(this->retract());
                     }
-                    file.write(m_writer.travel_to_z(m_max_layer_z + m_writer.config.z_hop.get_at(get_filament_config_index((int)initial_extruder_id))));
+                    const double profile_hop = m_writer.config.z_hop.get_at(get_filament_config_index((int)initial_extruder_id));
+                    // Section staging clears all previously deposited material;
+                    // a profile's zero-hop setting must not turn it into a skim.
+                    const double staging_z = m_max_layer_z + (has_sections ? std::max(1., profile_hop) : profile_hop);
+                    if (has_sections && (!std::isfinite(staging_z) || staging_z > print.config().printable_height.value + EPSILON))
+                        throw SlicingError(_u8L("Insufficient vertical clearance for a non-planar section transition."));
+                    file.write(m_writer.travel_to_z(staging_z));
+                    if (has_sections)
+                        m_avoid_crossing_perimeters.disable_once();
                     file.write(this->travel_to(Point(0, 0), erNone, "move to origin position for next object"));
                     m_enable_cooling_markers = true;
                     // Disable motion planner when traveling to first object point.
@@ -4637,13 +4655,16 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
                 m_printed_objects.emplace_back(&object);
                 this->process_layers(print, tool_ordering, collect_layers_to_print(object, print.config().belt_printer.value), *print_object_instance_sequential_active - object.instances().data(), file,
                                      prime_extruder);
+                if (has_sections && m_fan_mover)
+                    file.write(m_fan_mover->process_gcode("", true));
                 if (section_frame) {
-                    if (m_fan_mover)
-                        file.write(m_fan_mover->process_gcode("", true));
                     file.write(end_section_frame(m_writer));
                     m_last_pos_defined = false;
                     m_wipe.reset_path();
                 }
+                if (has_sections)
+                    m_max_layer_z = static_cast<float>(max_printed_machine_z(m_processor.get_result(), object_moves_begin,
+                        previous_world_maximum, m_config.z_offset.value));
                 {
                     // save the flush statitics stored in tool ordering by object
                     print.m_statistics_by_extruder_count.stats_by_single_extruder += tool_ordering.get_filament_change_stats(ToolOrdering::FilamentChangeMode::SingleExt);

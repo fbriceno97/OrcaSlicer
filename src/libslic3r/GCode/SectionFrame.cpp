@@ -3,9 +3,12 @@
 #include "../Print.hpp"
 #include "../PrintConfig.hpp"
 #include "../GCodeWriter.hpp"
+#include "GCodeProcessor.hpp"
 
 #include <Eigen/Geometry>
 #include <algorithm>
+#include <cmath>
+#include <cstddef>
 #include <iomanip>
 #include <iterator>
 #include <limits>
@@ -54,6 +57,26 @@ std::string end_section_frame(GCodeWriter &writer)
         return {};
     writer.set_section_transform(std::nullopt);
     return "; SEGMENT_ID:-1\n; TOOL_AXIS:0,0,1\n";
+}
+
+double max_printed_machine_z(const GCodeProcessorResult &result, size_t first_move,
+    double previous_maximum, double z_calibration)
+{
+    if (first_move > result.moves.size())
+        throw std::out_of_range("Invalid first move for section height tracking");
+    if (!std::isfinite(previous_maximum) || !std::isfinite(z_calibration))
+        throw std::invalid_argument("Invalid section height or calibration");
+    double maximum = previous_maximum;
+    for (size_t i = first_move; i < result.moves.size(); ++i) {
+        const auto &move = result.moves[i];
+        if ((move.type != EMoveType::Extrude && move.type != EMoveType::Wipe) || move.delta_extruder <= 0.f)
+            continue;
+        const double z = double(move.position.z()) + z_calibration;
+        if (!std::isfinite(z))
+            throw std::invalid_argument("Nonfinite deposited section height");
+        maximum = std::max(maximum, z);
+    }
+    return maximum;
 }
 
 } // namespace Slic3r

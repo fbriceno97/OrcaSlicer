@@ -57,6 +57,28 @@
 using namespace Slic3r;
 using namespace Slic3r::Test;
 
+TEST_CASE("Section staging height tracks calibrated deposition and ignores nonprinting travel", "[GCodeWriter][Nonplanar]")
+{
+    GCodeProcessorResult result;
+    result.moves.resize(4);
+    result.moves[0].type = EMoveType::Extrude;
+    result.moves[0].position = Vec3f(0.f, 0.f, 15.f);
+    result.moves[0].delta_extruder = 1.f;
+    result.moves[1].type = EMoveType::Wipe;
+    result.moves[1].position = Vec3f(0.f, 0.f, 20.f);
+    result.moves[1].delta_extruder = 0.5f;
+    result.moves[2].type = EMoveType::Travel;
+    result.moves[2].position = Vec3f(0.f, 0.f, 250.f);
+    result.moves[3].type = EMoveType::Wipe;
+    result.moves[3].position = Vec3f(0.f, 0.f, 100.f);
+    result.moves[3].delta_extruder = -0.5f;
+    CHECK_THAT(max_printed_machine_z(result, 0, 0., 0.2), Catch::Matchers::WithinAbs(20.2, 1e-6));
+    CHECK_THAT(max_printed_machine_z(result, 2, 10., 0.2), Catch::Matchers::WithinAbs(10., 1e-6));
+    CHECK_THROWS_AS(max_printed_machine_z(result, 5, 0., 0.), std::out_of_range);
+    result.moves[1].position.z() = std::numeric_limits<float>::quiet_NaN();
+    CHECK_THROWS_AS(max_printed_machine_z(result, 0, 0., 0.), std::invalid_argument);
+}
+
 TEST_CASE("Section XYZ motion restores each scaled and mirrored copy without rotating calibration", "[GCodeWriter][Nonplanar]")
 {
     const bool mirrored = GENERATE(false, true);
