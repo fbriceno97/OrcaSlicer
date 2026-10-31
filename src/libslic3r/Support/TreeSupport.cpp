@@ -39,6 +39,7 @@
 #include "TreeSupport.hpp"
 #include "TreeSupport3D.hpp"
 #include "BeltFloorContext.hpp"
+#include "SegmentSupportBounds.hpp"
 #include "libslic3r/libslic3r.h"
 #include <libnest2d/backends/libslic3r/geometries.hpp>
 #include <libnest2d/placers/nfpplacer.hpp>
@@ -895,6 +896,7 @@ void TreeSupport::detect_overhangs(bool check_support_necessity/* = false*/)
     typedef std::chrono::duration<double, std::ratio<1> > second_;
     std::chrono::time_point<clock_> t0{ clock_::now() };
     // main part of overhang detection can be parallel
+    const SegmentSupportBounds section_floor(*m_object);
     tbb::concurrent_vector<ExPolygons> overhangs_all_layers(m_object->layer_count());
     tbb::parallel_for(tbb::blocked_range<size_t>(0, m_object->layer_count()),
         [&](const tbb::blocked_range<size_t>& range) {
@@ -908,7 +910,10 @@ void TreeSupport::detect_overhangs(bool check_support_necessity/* = false*/)
                 Layer* layer = m_object->get_layer(layer_nr);
 
                 if (layer->lower_layer == nullptr) {
-                    for (auto& slice : layer->lslices_extrudable) {
+                    const ExPolygons unsupported = section_floor.is_active() ?
+                        diff_ex(layer->lslices_extrudable, section_floor.floor_band(layer->bottom_z(), layer->print_z)) :
+                        layer->lslices_extrudable;
+                    for (const auto& slice : unsupported) {
                         auto bbox_size = get_extents(slice).size();
                         if (!((bbox_size.x() > length_thresh_well_supported && bbox_size.y() > length_thresh_well_supported))
                             && g_config_support_sharp_tails) {
@@ -982,6 +987,16 @@ void TreeSupport::detect_overhangs(bool check_support_necessity/* = false*/)
                     }
                 }
 
+                // A cut face carries the material touching it, just as the bed does.
+                // Only load-bearing floors participate; ceilings cannot support a branch.
+                if (section_floor.is_active()) {
+                    const Polygons floor = section_floor.floor_band(layer->bottom_z(), layer->print_z);
+                    if (!floor.empty()) {
+                        append(effective_lower, union_ex(floor));
+                        effective_lower = union_ex(effective_lower);
+                    }
+                }
+
                 // normal overhang
                 ExPolygons lower_layer_offseted = offset_ex(effective_lower, support_offset_scaled, SUPPORT_SURFACES_OFFSET_PARAMETERS);
                 overhangs_all_layers[layer_nr] = diff_ex(curr_polys, lower_layer_offseted);
@@ -1004,7 +1019,7 @@ void TreeSupport::detect_overhangs(bool check_support_necessity/* = false*/)
                         // shear-advanced lower layer, or every belt-contact island reads as
                         // a sharp tail -- which is what the empty-predecessor skip above was
                         // really masking. effective_lower is exactly that notion of below.
-                        const ExPolygons &tail_lower = belt_ovh_active ? effective_lower : lower_polys;
+                        const ExPolygons &tail_lower = (belt_ovh_active || section_floor.is_active()) ? effective_lower : lower_polys;
                         if (!overlaps(offset_ex(expoly, 0.1 * extrusion_width_scaled), tail_lower)) {
                             is_sharp_tail = !offset_ex(expoly, -0.1 * extrusion_width_scaled).empty();
                         }

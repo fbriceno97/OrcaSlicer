@@ -4,6 +4,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "libslic3r/Support/SectionSupportDemand.hpp"
+#include "libslic3r/Support/TreeSupport.hpp"
 #include "libslic3r/CutPlanes.hpp"
 #include "libslic3r/CutPlaneSegmentation.hpp"
 #include "libslic3r/Print.hpp"
@@ -124,11 +125,13 @@ TEST_CASE("Support projection stops at material that has caught the load", "[Non
 TEST_CASE("A parent generates support for inherited body load and rebuilds it without stale demand", "[Nonplanar][Support]")
 {
     const bool child_needs_support = GENERATE(false, true);
+    const bool independent_height = GENERATE(false, true);
     DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
     config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"enable_support", "1"},
         {"support_type", "normal(auto)"}, {"layer_height", "0.2"},
         {"initial_layer_print_height", "0.2"}, {"support_top_z_distance", "0.2"},
         {"independent_support_layer_height", "1"}, {"elefant_foot_compensation", "0"}});
+    config.set_deserialize_strict("independent_support_layer_height", independent_height ? "1" : "0");
     TriangleMesh mesh = make_cube(4., 10., child_needs_support ? 15. : 10.);
     TriangleMesh cap = make_cube(20., 10., 2.);
     cap.translate(0.f, 0.f, child_needs_support ? 15.f : 10.f);
@@ -194,4 +197,40 @@ TEST_CASE("A parent generates support for inherited body load and rebuilds it wi
     without_support.slice();
     CHECK_THAT(without_support.layers().back()->print_z, Catch::Matchers::WithinAbs(10., 0.001));
     CHECK(without_support.segment_body_demand().empty());
+}
+
+TEST_CASE("Tree overhang detection treats an inclined section floor as supporting material", "[Nonplanar][Support]")
+{
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"enable_support", "1"},
+        {"support_type", "tree(auto)"}, {"support_style", "tree_hybrid"},
+        {"support_remove_small_overhang", "0"}, {"max_bridge_length", "0"},
+        {"layer_height", "0.2"}, {"initial_layer_print_height", "0.2"},
+        {"elefant_foot_compensation", "0"}});
+    Print print;
+    Model model;
+    Slic3r::Test::init_print({Slic3r::Test::cube(20.)}, print, model, config);
+    ModelObject *object = model.objects.front();
+    object->cut_planes.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(10., 10., 10.);
+    plane.normal = Vec3d(0., 0.2, 1.).normalized();
+    plane.has_build_normal = true;
+    plane.build_normal = Vec3d::UnitZ();
+    object->cut_planes.planes.push_back(plane);
+    print.apply(model, config);
+    const auto families = section_support_families(print);
+    REQUIRE(families.size() == 1);
+    PrintObject &child = *families.front().front();
+    child.slice();
+    child.make_perimeters();
+    child.prepare_infill();
+    TreeSupport tree(child, child.slicing_parameters());
+    tree.detect_overhangs();
+    // Each growing bottom strip touches the cut face. The cube's vertical
+    // walls above it need no support either, even with small-island pruning off.
+    for (const Layer *layer : child.layers()) {
+        INFO("section layer at " << layer->print_z);
+        CHECK(layer->loverhangs.empty());
+    }
 }
