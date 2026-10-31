@@ -2088,3 +2088,60 @@ TEST_CASE("Height ranges and modifiers count for the filament shrinkage compensa
     });
     CHECK(mismatch_warning == ! object_on_filament_2);
 }
+
+TEST_CASE("Sequential clearance groups sections by copy while retaining clearance between copies", "[Print][Nonplanar]")
+{
+    const bool close_copies = GENERATE(false, true);
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"print_sequence", "by object"},
+        {"nozzle_height", "15"}, {"extruder_clearance_radius", "30"},
+        {"extruder_clearance_height_to_lid", "100"}, {"extruder_clearance_height_to_rod", "100"},
+        {"skirt_loops", "0"}, {"brim_type", "no_brim"}});
+    Print print;
+    Model model;
+    Slic3r::Test::init_print({Slic3r::Test::cube(20.)}, print, model, config);
+    ModelObject *object = model.objects.front();
+    object->instances.front()->set_offset(Vec3d(60., 60., 0.));
+    object->add_instance(*object->instances.front())->set_offset(Vec3d(close_copies ? 100. : 160., 60., 0.));
+    object->cut_planes.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(10., 10., 10.);
+    object->cut_planes.planes.push_back(plane);
+    print.apply(model, config);
+    REQUIRE(print.objects().size() == 4);
+    const auto result = Print::sequential_print_clearance_valid(print);
+    CHECK(result.string.empty() == !close_copies);
+    const auto ordered = sort_object_instances_by_model_order(print);
+    REQUIRE(ordered.size() == 4);
+    CHECK(ordered[0]->model_instance == ordered[1]->model_instance);
+    CHECK(ordered[0]->print_object->segment_index() < ordered[1]->print_object->segment_index());
+    CHECK(ordered[2]->model_instance == ordered[3]->model_instance);
+}
+
+TEST_CASE("Sequential section clearance uses compensated whole-copy height above the bed", "[Print][Nonplanar]")
+{
+    const bool compensated = GENERATE(false, true);
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"print_sequence", "by object"},
+        {"nozzle_height", "1"}, {"extruder_clearance_radius", "10"},
+        {"extruder_clearance_height_to_lid", "100"}, {"extruder_clearance_height_to_rod", "20.5"},
+        {"filament_shrinkage_compensation_z", compensated ? "95" : "100"},
+        {"skirt_loops", "0"}, {"brim_type", "no_brim"}});
+    Print print;
+    Model model;
+    Slic3r::Test::init_print({Slic3r::Test::cube(20.)}, print, model, config);
+    ModelObject *object = model.objects.front();
+    object->instances.front()->set_offset(Vec3d(60., 60., 0.));
+    object->add_instance(*object->instances.front())->set_offset(Vec3d(160., 60., 0.));
+    object->cut_planes.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(10., 10., 10.);
+    object->cut_planes.planes.push_back(plane);
+    print.apply(model, config);
+    std::vector<std::pair<Polygon, float>> heights;
+    const auto result = Print::sequential_print_clearance_valid(print, nullptr, &heights);
+    // 20 / .95 exceeds the configured 20.5-mm rod clearance even though
+    // each section's own rebased height is only about 10.5 mm.
+    CHECK(result.string.empty() == !compensated);
+    CHECK(heights.empty() == !compensated);
+}

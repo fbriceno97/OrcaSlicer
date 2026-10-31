@@ -845,6 +845,7 @@ StringObjectException Print::sequential_print_clearance_valid(const Print &print
         int                  object_index;
         double         arrange_score;
         double               height;
+        double               max_z;
     };
     auto find_object_index = [](const Model& model, const ModelObject* obj) {
         for (int index = 0; index < model.objects.size(); index++)
@@ -855,6 +856,34 @@ StringObjectException Print::sequential_print_clearance_valid(const Print &print
         return -1;
     };
 
+    // Sections overlap deliberately within one copy. Check the complete physical
+    // copy once, including shrinkage, while keeping clearance between copies.
+    struct SectionBounds { Polygon hull; double max_z; };
+    std::unordered_map<const ModelInstance *, SectionBounds> section_bounds;
+    if (print_config.enable_nonplanar.value)
+        for (const PrintObject *object : print.objects())
+            if (object->segment())
+                for (const PrintInstance &instance : object->instances()) {
+                    if (section_bounds.count(instance.model_instance) != 0)
+                        continue;
+                    const Transform3d frame = instance.model_instance->get_transformation()
+                        .get_matrix_with_applied_shrinkage_compensation(print.shrinkage_compensation());
+                    section_bounds.emplace(instance.model_instance, SectionBounds{
+                        object->model_object()->convex_hull_2d(frame),
+                        scale_(object->model_object()->instance_convex_hull_bounding_box(instance.model_instance).max.z() *
+                            print.shrinkage_compensation().z())});
+                }
+    bool all_short = print.is_all_objects_are_short();
+    if (!section_bounds.empty()) {
+        all_short = true;
+        for (const PrintObject *object : print.objects())
+            if (object->segment()) {
+                for (const PrintInstance &instance : object->instances())
+                    all_short &= section_bounds.at(instance.model_instance).max_z < scale_(print_config.nozzle_height.value);
+            } else
+                all_short &= object->height() < scale_(print_config.nozzle_height.value);
+    }
+    std::unordered_set<const ModelInstance *> checked_sections;
     auto [object_skirt_offset, _] = print.object_skirt_offset();
     std::vector<struct print_instance_info> print_instance_with_bounding_box;
     {
@@ -866,7 +895,7 @@ StringObjectException Print::sequential_print_clearance_valid(const Print &print
 
         // Shrink the extruder_clearance_radius a tiny bit, so that if the object arrangement algorithm placed the objects
         // exactly by satisfying the extruder_clearance_radius, this test will not trigger collision.
-        float obj_distance = print.is_all_objects_are_short() ? scale_(std::max(0.5f * MAX_OUTER_NOZZLE_DIAMETER, object_skirt_offset) - 0.1) : scale_(0.5 * print.config().extruder_clearance_radius.value + object_skirt_offset - 0.1);
+        float obj_distance = all_short ? scale_(std::max(0.5f * MAX_OUTER_NOZZLE_DIAMETER, object_skirt_offset) - 0.1) : scale_(0.5 * print.config().extruder_clearance_radius.value + object_skirt_offset - 0.1);
 
         for (const PrintObject *print_object : print.objects()) {
             assert(! print_object->model_object()->instances.empty());
@@ -875,18 +904,25 @@ StringObjectException Print::sequential_print_clearance_valid(const Print &print
             // Orca: check convex hull intersection for each instance individually to handle rotation/offset differences correctly
             // Now we check that no instance of convex_hull intersects any of the previously checked object instances.
             for (const PrintInstance &instance : print_object->instances()) {
-                Polygon convex_hull0 = print_object->model_object()->convex_hull_2d(Geometry::assemble_transform(
-                            { 0.0, 0.0, instance.model_instance->get_offset().z() }, instance.model_instance->get_rotation(), instance.model_instance->get_scaling_factor(), instance.model_instance->get_mirror()));
-
-                Polygon convex_hull_no_offset = convex_hull0, convex_hull;
+                const auto physical = section_bounds.find(instance.model_instance);
+                const bool section_copy = print_object->segment() && physical != section_bounds.end();
+                if (section_copy && !checked_sections.insert(instance.model_instance).second)
+                    continue;
+                Polygon convex_hull_no_offset = section_copy ? physical->second.hull :
+                    print_object->model_object()->convex_hull_2d(Geometry::assemble_transform(
+                        {0., 0., instance.model_instance->get_offset().z()}, instance.model_instance->get_rotation(),
+                        instance.model_instance->get_scaling_factor(), instance.model_instance->get_mirror()));
+                Polygon convex_hull;
                 auto tmp = offset(convex_hull_no_offset, obj_distance, jtRound, scale_(0.1));
                 if (!tmp.empty()) { // tmp may be empty due to clipper's bug, see STUDIO-2452
                     convex_hull = tmp.front();
                     // instance.shift is a position of a centered object, while model object may not be centered.
                     // Convert the shift from the PrintObject's coordinates into ModelObject's coordinates by removing the centering offset.
-                    convex_hull.translate(instance.shift - print_object->center_offset());
+                    if (!section_copy)
+                        convex_hull.translate(instance.shift - print_object->center_offset());
                 }
-                convex_hull_no_offset.translate(instance.shift - print_object->center_offset());
+                if (!section_copy)
+                    convex_hull_no_offset.translate(instance.shift - print_object->center_offset());
                 //juedge the exclude area
                 if (!intersection(exclude_polys, convex_hull_no_offset).empty()) {
                     if (single_object_exception.string.empty()) {
@@ -933,6 +969,7 @@ StringObjectException Print::sequential_print_clearance_valid(const Print &print
                 }
                 struct print_instance_info print_info {&instance, convex_hull.bounding_box(), convex_hull};
                 print_info.height = instance.print_object->height();
+                print_info.max_z = section_copy ? physical->second.max_z : instance.print_object->max_z();
                 print_info.object_index = find_object_index(print.model(), print_object->model_object());
                 print_instance_with_bounding_box.push_back(std::move(print_info));
                 convex_hulls_other.emplace_back(std::move(convex_hull));
@@ -1122,7 +1159,7 @@ StringObjectException Print::sequential_print_clearance_valid(const Print &print
                     break;
                 }
             }
-            if (height < inst->print_object->max_z())
+            if (height < print_instance_with_bounding_box[k].max_z)
                 too_tall_instances[inst] = std::make_pair(print_instance_with_bounding_box[k].hull_polygon, unscaled<double>(height));
         }
 

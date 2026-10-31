@@ -124,6 +124,13 @@ parts with zero rotation: their rebased layer schedules still require section
 emission. The guard prevents a project from silently producing ordinary planar
 G-code for these descriptors.
 
+Sequential clearance groups sections by their physical model instance. It uses
+the complete compensated model footprint and maximum world Z once per copy,
+rather than reporting overlapping sections as separate objects or treating each
+short local section as a short completed part. Different copies retain horizontal
+head and vertical rod/lid clearance checks. Section print ordering remains
+parent-first within each copy.
+
 Sequential staging tracks the calibrated height of actual deposited moves,
 including positive-extrusion wipes, instead of a section's rebased local maximum.
 The horizontal transfer uses at least 1 mm above this height (or the profile's
