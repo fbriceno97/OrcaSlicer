@@ -399,7 +399,7 @@ TEST_CASE("Section raw macros reject unrepresentable coordinate state changes", 
 {
     const std::string commands = GENERATE(std::string("G91\nG1 X1\n"), std::string("G20\n"),
         std::string("G92 Z0\n"), std::string("G28\n"), std::string("G54\n"),
-        std::string("G1 E1\n"), std::string("G92 E0\n"), std::string("M204 S3000\n"),
+        std::string("G1 E1\n"), std::string("G92 E1\n"), std::string("M204 S3000\n"),
         std::string("M622 J1\nG1 X1\nM623\n"), std::string("M622 J1\n"));
     struct MacroGCode : GCode {
         MacroGCode()
@@ -418,6 +418,36 @@ TEST_CASE("Section raw macros reject unrepresentable coordinate state changes", 
     generator.writer().set_position_from_custom_gcode(initial);
     const std::string output = generator.placeholder_parser_process("layer_change_gcode", commands, 0);
     CHECK(output.find("!!!!!") != std::string::npos);
+    CHECK_THAT((generator.writer().position_for_custom_gcode() - initial).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+}
+
+TEST_CASE("Section E-only precision resets retain physical pose and deposited volume", "[GCodeWriter][Nonplanar]")
+{
+    const bool relative = GENERATE(false, true);
+    struct ResetGCode : GCode {
+        explicit ResetGCode(bool relative)
+        {
+            PrintConfig config;
+            config.use_relative_e_distances.value = relative;
+            config.travel_speed_z.values = {4.};
+            m_config.apply(config, true);
+            m_writer.apply_print_config(config);
+            m_writer.set_extruders({0});
+            m_writer.set_extruder(0);
+            m_placeholder_parser_integration.init(m_writer);
+        }
+    } generator(relative);
+    Transform3d frame = Transform3d::Identity();
+    frame.rotate(Eigen::AngleAxisd(Geometry::deg2rad(10.), Vec3d::UnitY()));
+    generator.writer().set_section_transform(frame);
+    const Vec3d initial(12., 15., 20.);
+    generator.writer().set_position_from_custom_gcode(initial);
+    generator.writer().filament()->extrude(2.);
+    const double volume = generator.writer().filament()->extruded_volume();
+    const std::string output = generator.placeholder_parser_process("layer_change_gcode", "G92 E0\n", 0);
+    CHECK((output.find("!!!!!") == std::string::npos) == relative);
+    CHECK_THAT(generator.writer().filament()->E(), Catch::Matchers::WithinAbs(relative ? 0. : 2., 1e-9));
+    CHECK_THAT(generator.writer().filament()->extruded_volume(), Catch::Matchers::WithinAbs(volume, 1e-9));
     CHECK_THAT((generator.writer().position_for_custom_gcode() - initial).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
 }
 

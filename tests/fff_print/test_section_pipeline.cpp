@@ -276,7 +276,7 @@ TEST_CASE("Production export preserves section order and world heights for a per
         {"use_relative_e_distances", "1"}, {"travel_speed_z", "4"},
         {"machine_start_gcode", "G90\nM83\nG1 X0 Y0 Z2 F240\n"},
         {"machine_end_gcode", "M400\n"}, {"before_layer_change_gcode", ""},
-        {"layer_change_gcode", "G1 Z{layer_z}\n"}, {"time_lapse_gcode", ""}});
+        {"layer_change_gcode", "G92 E0\nG1 Z{layer_z}\n"}, {"time_lapse_gcode", ""}});
     Print print;
     Model model;
     Slic3r::Test::init_print({Slic3r::Test::cube(20.)}, print, model, config);
@@ -348,7 +348,7 @@ TEST_CASE("Full section slicing exports solid surfaces and infill through uprigh
         {"part_cooling_fan_min_pwm", "0"}, {"slow_down_for_layer_cooling", "0"},
         {"machine_start_gcode", "G90\nM83\nG1 X0 Y0 Z2 F240\n"},
         {"machine_end_gcode", "M400\n"}, {"before_layer_change_gcode", ""},
-        {"layer_change_gcode", "G1 Z{layer_z}\n"},
+        {"layer_change_gcode", "G92 E0\nG1 Z{layer_z}\n"},
         {"time_lapse_gcode", "; SECTION_TIMELAPSE_PROBE\nG91\nG1 X100 E1\nG90\n"}});
     Print print;
     Model model;

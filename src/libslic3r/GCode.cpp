@@ -831,7 +831,7 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
     }
 
     static std::optional<Vec3d> section_custom_gcode_endpoint(std::string &gcode, Vec3d position,
-        double max_feedrate, double &feedrate)
+        double max_feedrate, double &feedrate, bool &reset_extrusion)
     {
         bool relative = false, moved = false;
         unsigned conditional_depth = 0;
@@ -876,6 +876,11 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
                 // Bound raw macro motion as well as generated moves. Explicit
                 // feed words preserve the same physical cap in temporary inch mode.
                 adjusted.set(F, std::floor(feedrate / units * 1e6) / 1e6, 6);
+            } else if (ascii_iequals(cmd, "G92") && !line.has(X) && !line.has(Y) && !line.has(Z) &&
+                       line.has(E) && line.e() == 0.f && conditional_depth == 0) {
+                // An E-only zero is the standard per-layer precision reset;
+                // it changes no physical XYZ coordinate or deposited volume.
+                reset_extrusion = true;
             } else if (ascii_iequals(cmd, "G92") || ascii_iequals(cmd, "G28") ||
                        ascii_iequals(cmd, "G29") || ascii_iequals(cmd, "G53") ||
                        ascii_iequals(cmd, "G54") || ascii_iequals(cmd, "G55") ||
@@ -4712,8 +4717,8 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
                     }
                 }
                 // Reset the cooling buffer internal state (the current position, feed rate, accelerations).
-                // Print's export guard remains until section transitions, layer
-                // semantics and support propagation are fully integrated.
+                // Compatibility validation limits section scheduling to the
+                // supported path; emitted machine motion is checked at export.
                 const bool section_frame = object.segment().has_value();
                 ScopeGuard reset_section([this, section_frame]() {
                     if (section_frame)
@@ -5457,8 +5462,15 @@ PlaceholderParserIntegration &ppi = m_placeholder_parser_integration;
             const std::string bounded_feed = m_writer.set_speed(m_writer.get_current_speed());
             const double maximum_feed = m_writer.get_current_speed();
             double final_feed = maximum_feed;
+            bool reset_extrusion = false;
             raw_endpoint = section_custom_gcode_endpoint(output,
-                Vec3d(ppi.position[0], ppi.position[1], ppi.position[2]), maximum_feed, final_feed);
+                Vec3d(ppi.position[0], ppi.position[1], ppi.position[2]), maximum_feed, final_feed, reset_extrusion);
+            if (reset_extrusion) {
+                if (!m_writer.config.use_relative_e_distances.value)
+                    throw std::runtime_error(_u8L("Section G92 E0 resets require relative extrusion mode."));
+                if (m_writer.filament() != nullptr)
+                    m_writer.filament()->reset_E();
+            }
             if (raw_endpoint)
                 output = bounded_feed + output;
             // Raw commands already contain their feed words; synchronize the

@@ -137,7 +137,9 @@ XYZ mode and millimeters. Homing and machine-origin/workspace changes reject the
 template rather than leaving a guessed position. Explicit position-variable
 assignments retain their existing authoritative behavior. Raw XYZ motion receives
 the writer's conservative physical feed cap, including explicit feed commands
-and temporary inch units. Raw extrusion, coordinate resets, motion-limit changes
+and temporary inch units. E-only `G92 E0` precision resets are accepted in
+relative extrusion mode and reset the writer's shared E coordinate without
+changing physical pose or used-filament accounting. Raw extrusion, XYZ coordinate resets, motion-limit changes
 and conditional XYZ moves are rejected inside sections. Firmware conditionals
 must be balanced within the macro. Startup/global macros retain their existing
 behavior and remain covered by chronological hotend validation.
