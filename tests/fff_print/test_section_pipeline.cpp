@@ -1,3 +1,12 @@
+#include "libslic3r/Support/SectionSupportDemand.hpp"
+#include "libslic3r/GCode/SectionFrame.hpp"
+#include "libslic3r/CutPlanes.hpp"
+#include "libslic3r/Layer.hpp"
+#include "libslic3r/ExtrusionEntityCollection.hpp"
+#include "libslic3r/Polyline.hpp"
+#include <algorithm>
+#include <cmath>
+#include <vector>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -124,6 +133,121 @@ TEST_CASE("Tilted section motion keeps feed limits and metadata through pressure
         std::ofstream fixture((boost::filesystem::path(directory) / "nonplanar-tilted-pipeline.gcode").string(), std::ios::binary);
         REQUIRE(fixture.is_open());
         fixture << "; Software regression fixture only; NOT printer-ready G-code.\n" << output;
+        fixture.flush();
+        REQUIRE(fixture.good());
+    }
+}
+
+TEST_CASE("Sliced inherited supports retain contact height and flow in section G-code", "[Nonplanar][GCode]")
+{
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"enable_support", "1"},
+        {"support_type", "normal(auto)"}, {"layer_height", "0.2"},
+        {"initial_layer_print_height", "0.2"}, {"support_top_z_distance", "0.2"},
+        {"independent_support_layer_height", "1"}, {"elefant_foot_compensation", "0"},
+        {"use_relative_e_distances", "1"}, {"travel_speed_z", "4"}});
+    TriangleMesh mesh = make_cube(4., 10., 10.);
+    TriangleMesh cap = make_cube(20., 10., 2.);
+    cap.translate(0.f, 0.f, 10.f);
+    mesh.merge(cap);
+    Print print;
+    Model model;
+    Slic3r::Test::init_print({mesh}, print, model, config);
+    ModelObject *object = model.objects.front();
+    object->cut_planes.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(2., 5., 10.);
+    object->cut_planes.planes.push_back(plane);
+    print.apply(model, config);
+    const auto families = section_support_families(print);
+    REQUIRE(families.size() == 1);
+    generate_section_support_family(families.front());
+
+    struct PathGCode : GCode { using GCode::collect_layers_to_print; } generator;
+    generator.apply_print_config(print.config());
+    GCodeWriter &writer = generator.writer();
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    writer.set_section_motion_limits(true);
+    writer.set_position_from_custom_gcode(Vec3d(0., 0., 2.));
+    std::string program = "G90\nM83\nT0\nG1 X0 Y0 Z2 F240\n";
+    const double diameter = print.config().filament_diameter.values.front();
+    const double filament_area = PI * diameter * diameter / 4.;
+    double deposited_z = 0., expected_e = 0.;
+    size_t emitted_paths = 0;
+    // This is a component fixture with deliberately elevated inter-path travel,
+    // not the production export path or a printer startup/end sequence.
+    for (auto section = families.front().rbegin(); section != families.front().rend(); ++section) {
+        const PrintInstance &instance = (*section)->instances().front();
+        const Transform3d to_world = instance.get_slice_to_world_transform();
+        REQUIRE_THAT((to_world.linear().col(2) - Vec3d::UnitZ()).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+        generator.set_origin(Vec2d(unscale<double>(instance.shift.x()), unscale<double>(instance.shift.y())));
+        program += begin_section_frame(instance, generator.origin(), writer);
+        for (const auto &row : PathGCode::collect_layers_to_print(**section)) {
+            const auto emit = [&](const ExtrusionEntity &entity) {
+                for_each_extrusion_path(entity, [&](const ExtrusionPath &path) {
+                    const Polyline polyline = path.polyline.to_polyline();
+                    REQUIRE(polyline.points.size() >= 2);
+                    REQUIRE(path.mm3_per_mm > 0.);
+                    const double z = row.print_z();
+                    const double staging_z = deposited_z + 1. - to_world.translation().z();
+                    program += writer.travel_to_xyz(Vec3d(writer.get_position().x(), writer.get_position().y(), staging_z), "fixture clearance", true);
+                    const Vec2d start = generator.point_to_gcode(polyline.points.front());
+                    program += writer.travel_to_xy(start);
+                    program += writer.travel_to_z(z, "fixture descent", true);
+                    const bool support = is_support(path.role());
+                    program += std::string("; FEATURE: ") + (support ? "Support" : "Outer wall") +
+                        "\n; LAYER_HEIGHT: " + std::to_string(path.height) +
+                        "\n; LINE_WIDTH: " + std::to_string(path.width) + "\n";
+                    program += writer.set_speed(3000.);
+                    for (size_t i = 1; i < polyline.points.size(); ++i) {
+                        const double length = unscale<double>(polyline.points[i].distance_to(polyline.points[i - 1]));
+                        const double extrusion = length * path.mm3_per_mm / filament_area;
+                        program += writer.extrude_to_xy(generator.point_to_gcode(polyline.points[i]), extrusion);
+                        expected_e += extrusion;
+                    }
+                    deposited_z = std::max(deposited_z, writer.position_for_custom_gcode().z());
+                    ++emitted_paths;
+                });
+            };
+            if (row.object_layer)
+                for (const LayerRegion *region : row.object_layer->regions())
+                    emit(region->perimeters);
+            if (row.support_layer)
+                emit(row.support_layer->support_fills);
+        }
+        program += end_section_frame(writer);
+    }
+    REQUIRE(emitted_paths > 0);
+    double parsed_e = 0.;
+    GCodeReader reader;
+    reader.apply_config(writer.config);
+    reader.parse_buffer(program, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
+        if (line.has(F))
+            CHECK(line.f() <= 240.001f);
+        if (line.has(E) && line.e() > 0.f)
+            parsed_e += line.e();
+    });
+    CHECK_THAT(parsed_e, Catch::Matchers::WithinRel(expected_e, 0.005));
+    GCodeProcessor processor;
+    processor.apply_config(print.config());
+    processor.preserve_preparation_z(true);
+    processor.initialize_result_moves();
+    processor.process_buffer(program);
+    processor.finalize(false);
+    const auto &result = processor.get_result();
+    CHECK(result.nonplanar_metadata_valid);
+    double support_top = 0.;
+    for (const auto &move : result.moves)
+        if (move.type == EMoveType::Extrude && is_support(move.extrusion_role))
+            support_top = std::max(support_top, double(move.position.z()));
+    CHECK_THAT(support_top, Catch::Matchers::WithinAbs(9.8, 0.021));
+    CHECK_NOTHROW(print.validate_nonplanar_gcode(result));
+    if (const char *directory = std::getenv("ORCA_TEST_GCODE_ARTIFACT_DIR"); directory && *directory) {
+        boost::filesystem::create_directories(directory);
+        std::ofstream fixture((boost::filesystem::path(directory) / "nonplanar-inherited-support.gcode").string(), std::ios::binary);
+        REQUIRE(fixture.is_open());
+        fixture << "; Software perimeter/support fixture with elevated travel; NOT printer-ready.\n" << program;
         fixture.flush();
         REQUIRE(fixture.good());
     }
