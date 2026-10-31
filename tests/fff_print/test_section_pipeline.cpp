@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "libslic3r/libslic3r.h"
@@ -23,6 +24,8 @@
 #include <boost/filesystem/path.hpp>
 #include <cstdlib>
 #include <fstream>
+#include <ios>
+#include <optional>
 #include <string>
 #include <utility>
 #include <cstddef>
