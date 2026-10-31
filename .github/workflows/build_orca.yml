@@ -503,7 +503,7 @@ jobs:
           foreach ($suite in @('fff_print', 'libslic3r')) {
             $report = Join-Path $env:RUNNER_TEMP "orca-$suite-features.xml"
             $testLog = Join-Path $env:RUNNER_TEMP "orca-$suite-features.log"
-            ctest --test-dir "$env:BUILD_DIR/tests/$suite" -C Release -L '^(CutPlaneSegmentation|cutplanes|HotendCollision|HotendEnvelope|WaveOverhangs|Nonplanar|PreciseSeam3mf)$' --schedule-random --no-tests=error --timeout 180 --output-on-failure --output-junit $report 2>&1 | Tee-Object -FilePath $testLog
+            ctest --test-dir "$env:BUILD_DIR/tests/$suite" -C Release -L '^(CutPlaneSegmentation|cutplanes|HotendCollision|HotendEnvelope|WaveOverhangs|Nonplanar|PreciseSeam3mf|ConfigRegistration)$' --schedule-random --no-tests=error --timeout 180 --output-on-failure --output-junit $report 2>&1 | Tee-Object -FilePath $testLog
             $suiteExit = $LASTEXITCODE
             Write-Host "$suite feature test exit code: $suiteExit"
             python scripts/report_ctest_failures.py $report

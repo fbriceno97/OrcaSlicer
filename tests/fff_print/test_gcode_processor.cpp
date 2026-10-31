@@ -123,11 +123,18 @@ TEST_CASE("Collision processing retains unannotated preparation travel at its ph
     CHECK_THAT(maximum_z, WithinAbs(20.f, 1e-6f));
 }
 
-TEST_CASE("Fresh and reset motion results have neutral Z calibration", "[GCodeProcessor][Nonplanar]")
+TEST_CASE("Motion results preserve calibration on assignment and reset to neutral", "[GCodeProcessor][Nonplanar]")
 {
     GCodeProcessorResult result;
     CHECK(result.z_offset == 0.f);
     result.z_offset = 12.f;
+    GCodeProcessorResult copied;
+    copied = result;
+    CHECK(copied.z_offset == 12.f);
+    GCodeProcessorResult moved;
+    moved.z_offset = -3.f;
+    moved = std::move(copied);
+    CHECK(moved.z_offset == 12.f);
     result.reset();
     CHECK(result.z_offset == 0.f);
 }
