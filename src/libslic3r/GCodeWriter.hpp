@@ -218,6 +218,7 @@ protected:
     // Conservative until direction-aware section feed planning is installed:
     // any local XYZ motion can contain physical Z motion.
     double section_motion_speed(double requested) const;
+    unsigned int section_motion_acceleration(unsigned int requested) const;
 
     // True when travel speed is selected per destination point rather than per
     // layer. Set for writers that install a first-layer point test. The
@@ -240,6 +241,7 @@ protected:
     std::vector<Vec2d> m_section_tool_offsets;
     double m_section_z_offset {0.};
     double m_section_machine_speed_z {0.};
+    double m_section_machine_acceleration_z {0.};
     std::optional<Vec3d> m_section_emitted_position;
     void remember_section_position();
     Vec3d section_physical_offset() const;

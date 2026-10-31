@@ -101,8 +101,13 @@ are unset, generated section motion is rejected. The cap applies to mapped XY, X
 travel, extrusion feed commands and the cached speed used for role-based wipes,
 because each XYZ motion can contain physical Z motion. Closing a frame restores
 ordinary feed behavior. This deliberately conservative cap does not replace
-collision checks. Direction-aware feed optimization, acceleration and custom
-macros still require integration before section export can be enabled.
+collision checks. Print and travel acceleration are bounded by the configured
+machine Z acceleration, rounded downward to the writer's integer command format.
+Zero/inherited acceleration selects that bound inside a section. Sequential
+section entry establishes bounded modal acceleration before any section move;
+missing or sub-unit limits are rejected. Direction-aware feed optimization,
+global transitions and raw custom macros still require integration before section
+export can be enabled.
 
 G-code processing separately retains section IDs and normalized build directions.
 Reloading moves also reloads their direction palette. Annotated section travel

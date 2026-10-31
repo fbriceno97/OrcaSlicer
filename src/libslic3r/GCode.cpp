@@ -4640,6 +4640,10 @@ void GCode::_do_export(Print& print, GCodeOutputStream &file, ThumbnailsGenerato
                 });
                 file.write(begin_section_frame(**print_object_instance_sequential_active, m_origin, m_writer));
                 if (section_frame) {
+                    // Establish bounded modal acceleration before the first move,
+                    // even when the process requests inherited/default settings.
+                    file.write(m_writer.set_print_acceleration(std::numeric_limits<unsigned int>::max()));
+                    file.write(m_writer.set_travel_acceleration(std::numeric_limits<unsigned int>::max()));
                     m_last_pos_defined = false;
                     m_wipe.reset_path();
                 }

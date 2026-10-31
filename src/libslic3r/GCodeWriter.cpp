@@ -79,6 +79,17 @@ double GCodeWriter::section_motion_speed(double requested) const
     return std::min(requested, limit);
 }
 
+unsigned int GCodeWriter::section_motion_acceleration(unsigned int requested) const
+{
+    if (!m_section_transform)
+        return requested;
+    if (!std::isfinite(m_section_machine_acceleration_z) || m_section_machine_acceleration_z < 1.)
+        throw std::invalid_argument("Section motion requires a configured physical Z acceleration limit");
+    const auto limit = static_cast<unsigned int>(std::min(std::floor(m_section_machine_acceleration_z),
+        double(std::numeric_limits<unsigned int>::max())));
+    return requested == 0 ? limit : std::min(requested, limit);
+}
+
 bool GCodeWriter::point_on_first_layer(const Vec3d &point_logical) const
 {
     if (m_first_layer_point_test)
@@ -254,6 +265,17 @@ void GCodeWriter::apply_print_config(const PrintConfig &print_config)
         }
         if (speed > 0.)
             m_section_machine_speed_z = m_section_machine_speed_z > 0. ? std::min(m_section_machine_speed_z, speed) : speed;
+    }
+
+    m_section_machine_acceleration_z = 0.;
+    for (double acceleration : LIMITS(machine_max_acceleration_z)) {
+        if (!std::isfinite(acceleration) || acceleration < 0.) {
+            m_section_machine_acceleration_z = -1.;
+            break;
+        }
+        if (acceleration > 0.)
+            m_section_machine_acceleration_z = m_section_machine_acceleration_z > 0. ?
+                std::min(m_section_machine_acceleration_z, acceleration) : acceleration;
     }
 
     m_single_extruder_multi_material = print_config.single_extruder_multi_material.value;
@@ -545,6 +567,7 @@ std::string GCodeWriter::set_chamber_temperature(int temperature, bool wait)
 // copied from PrusaSlicer
 std::string GCodeWriter::set_acceleration_internal(Acceleration type, unsigned int acceleration)
 {
+    acceleration = section_motion_acceleration(acceleration);
     // Clamp the acceleration to the allowed maximum.
     if (type == Acceleration::Print && EXTRUDER_LIMIT(m_max_acceleration) > 0 && acceleration > EXTRUDER_LIMIT(m_max_acceleration))
         acceleration = EXTRUDER_LIMIT(m_max_acceleration);
@@ -650,6 +673,7 @@ std::string GCodeWriter::set_accel_and_jerk(unsigned int acceleration, double je
     if(FLAVOR_IS_NOT(gcfKlipper))
         throw std::runtime_error(_u8L("set_accel_and_jerk() is only supported by Klipper"));
 
+    acceleration = section_motion_acceleration(acceleration);
     // Clamp the acceleration to the allowed maximum.
     if (EXTRUDER_LIMIT(m_max_acceleration) > 0 && acceleration > EXTRUDER_LIMIT(m_max_acceleration))
         acceleration = EXTRUDER_LIMIT(m_max_acceleration);

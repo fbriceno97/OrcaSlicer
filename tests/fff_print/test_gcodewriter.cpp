@@ -186,6 +186,73 @@ TEST_CASE("Section XYZ motion restores each scaled and mirrored copy without rot
     }
 }
 
+TEST_CASE("Section acceleration bounds print and travel including inherited settings", "[GCodeWriter][Nonplanar]")
+{
+    const bool section = GENERATE(false, true);
+    const bool travel = GENERATE(false, true);
+    const unsigned int requested = GENERATE(0U, 50U, 5000U);
+    PrintConfig config;
+    config.gcode_flavor.value = gcfMarlinLegacy;
+    config.machine_max_acceleration_extruding.values = {10000., 10000.};
+    config.machine_max_acceleration_travel.values = {10000., 10000.};
+    config.machine_max_acceleration_z.values = {120.9, 120.9};
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    if (section)
+        writer.set_section_transform(Transform3d::Identity());
+    const std::string output = travel ? writer.set_travel_acceleration(requested) : writer.set_print_acceleration(requested);
+    const unsigned int expected = section ? (requested == 0 ? 120U : std::min(requested, 120U)) : requested;
+    size_t commands = 0;
+    GCodeReader reader;
+    reader.parse_buffer(output, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
+        if (line.cmd_is("M204")) {
+            float acceleration = 0.f;
+            REQUIRE(line.has_value('S', acceleration));
+            CHECK(acceleration == float(expected));
+            ++commands;
+        }
+    });
+    CHECK(commands == (expected > 0 ? 1 : 0));
+    writer.set_section_transform(std::nullopt);
+    CHECK_NOTHROW(writer.set_print_acceleration(5000));
+}
+
+TEST_CASE("Combined Klipper commands preserve the section Z acceleration bound", "[GCodeWriter][Nonplanar]")
+{
+    PrintConfig config;
+    config.gcode_flavor.value = gcfKlipper;
+    config.machine_max_acceleration_extruding.values = {10000., 10000.};
+    config.machine_max_acceleration_x.values = {10000., 10000.};
+    config.machine_max_acceleration_y.values = {10000., 10000.};
+    config.machine_max_acceleration_z.values = {120., 120.};
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    writer.set_section_transform(Transform3d::Identity());
+    CHECK(writer.set_accel_and_jerk(5000, 2.).find("ACCEL=120 ") != std::string::npos);
+    CHECK(writer.set_accel_and_jerk(5000, 2.).empty());
+    writer.set_section_transform(std::nullopt);
+    CHECK(writer.set_accel_and_jerk(5000, 2.).find("ACCEL=5000") != std::string::npos);
+}
+
+TEST_CASE("Section acceleration rejects an unset physical Z limit", "[GCodeWriter][Nonplanar]")
+{
+    PrintConfig config;
+    config.machine_max_acceleration_z.values = {0., 0.};
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    writer.set_section_transform(Transform3d::Identity());
+    CHECK_THROWS_AS(writer.set_print_acceleration(5000), std::invalid_argument);
+    CHECK_THROWS_AS(writer.set_travel_acceleration(0), std::invalid_argument);
+    writer.set_section_transform(std::nullopt);
+    CHECK_NOTHROW(writer.set_print_acceleration(5000));
+}
+
 TEST_CASE("Section travel respects configured physical Z speed on every mapped axis", "[GCodeWriter][Nonplanar]")
 {
     const bool section = GENERATE(false, true);
