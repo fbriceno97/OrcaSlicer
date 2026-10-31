@@ -91,6 +91,13 @@ larger Z hop), and rejects a staging height beyond the printer's vertical limit.
 The final collision check remains necessary for ascent/descent and other motion;
 these staging components do not remove the section export guard.
 
+Section travel uses a conservative scalar feed cap: the smaller positive Z travel
+and machine Z speed limits. Zero Z travel speed uses the machine limit; if both
+are unset, section travel is rejected. The cap applies to mapped XY, XYZ and Z
+travel because each can contain physical Z motion. Ordinary travel retains its
+existing behavior. Direction-aware extrusion feed planning and custom macros
+still require integration before section export can be enabled.
+
 G-code processing separately retains section IDs and normalized build directions.
 Reloading moves also reloads their direction palette. Annotated section travel
 retains its physical Z even during a custom start stage,

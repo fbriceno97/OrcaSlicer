@@ -215,6 +215,9 @@ protected:
     // True when a lift must be skipped because this mapping would emit the
     // stored logical X/Y and that position is not yet known.
     bool must_skip_lift_now() const;
+    // Conservative until direction-aware section feed planning is installed:
+    // any local travel can contain physical Z motion.
+    double section_travel_speed(double requested) const;
 
     // True when travel speed is selected per destination point rather than per
     // layer. Set for writers that install a first-layer point test. The
@@ -236,6 +239,7 @@ protected:
     std::optional<Transform3d> m_section_transform;
     std::vector<Vec2d> m_section_tool_offsets;
     double m_section_z_offset {0.};
+    double m_section_machine_speed_z {0.};
     Vec3d section_physical_offset() const;
     Vec3d map_section_point(const Vec3d &point) const;
 

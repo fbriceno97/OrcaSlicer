@@ -186,6 +186,63 @@ TEST_CASE("Section XYZ motion restores each scaled and mirrored copy without rot
     }
 }
 
+TEST_CASE("Section travel respects configured physical Z speed on every mapped axis", "[GCodeWriter][Nonplanar]")
+{
+    const bool section = GENERATE(false, true);
+    const double z_speed = GENERATE(0., 4., 20.);
+    const int travel = GENERATE(0, 1, 2);
+    PrintConfig config;
+    config.travel_speed.values = {400.};
+    config.travel_speed_z.values = {z_speed};
+    config.machine_max_speed_z.values = {8., 8.};
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    writer.set_is_first_layer(false);
+    writer.set_current_position_clear(true);
+    if (section) {
+        Transform3d frame = Transform3d::Identity();
+        frame.rotate(Eigen::AngleAxisd(Geometry::deg2rad(45.), Vec3d::UnitX()));
+        writer.set_section_transform(frame);
+    }
+    const std::string output = travel == 0 ? writer.travel_to_xy(Vec2d(10., 20.)) :
+        travel == 1 ? writer.travel_to_xyz(Vec3d(10., 20., 30.)) : writer.travel_to_z(30.);
+    const double expected = section ? (z_speed > 0. ? std::min(z_speed, 8.) : 8.) :
+        (travel == 2 && z_speed > 0. ? z_speed : 400.);
+    size_t feedrates = 0;
+    GCodeReader reader;
+    reader.parse_buffer(output, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
+        if (line.cmd_is("G1") && line.has(F)) {
+            CHECK_THAT(line.f(), Catch::Matchers::WithinAbs(expected * 60., 0.001));
+            ++feedrates;
+        }
+    });
+    CHECK(feedrates > 0);
+}
+
+TEST_CASE("Section travel requires an explicit Z limit when the machine limit is unset", "[GCodeWriter][Nonplanar]")
+{
+    PrintConfig config;
+    config.travel_speed_z.values = {0.};
+    config.machine_max_speed_z.values = {0., 0.};
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    writer.set_section_transform(Transform3d::Identity());
+    const Vec3d before = writer.get_position();
+    const bool clear_before = writer.is_current_position_clear();
+    CHECK_THROWS_AS(writer.travel_to_xy(Vec2d(10., 20.)), std::invalid_argument);
+    CHECK(writer.get_position() == before);
+    CHECK(writer.is_current_position_clear() == clear_before);
+    writer.config.travel_speed_z.values = {4.};
+    CHECK_NOTHROW(writer.travel_to_xy(Vec2d(10., 20.)));
+    writer.set_section_transform(std::nullopt);
+    writer.config.travel_speed_z.values = {0.};
+    CHECK_NOTHROW(writer.travel_to_xy(Vec2d(20., 30.)));
+}
+
 TEST_CASE("Section motion leaves physical calibration outside the build-frame rotation", "[GCodeWriter][Nonplanar]")
 {
     PrintConfig config;
