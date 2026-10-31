@@ -1291,6 +1291,7 @@ inline constexpr float DEFAULT_FILAMENT_DENSITY = 1.245f;
         float m_first_layer_height; // mm
         float m_zero_layer_height; // mm
         bool m_processing_start_custom_gcode;
+        bool m_preserve_preparation_z = false;
         bool m_in_config_block;
         unsigned int m_g1_line_id;
         unsigned int m_layer_id;
@@ -1375,6 +1376,9 @@ inline constexpr float DEFAULT_FILAMENT_DENSITY = 1.245f;
             return m_time_processor.machines[static_cast<size_t>(PrintEstimatedStatistics::ETimeMode::Stealth)].enabled;
         }
         void enable_machine_envelope_processing(bool enabled) { m_time_processor.machine_envelope_processing_enabled = enabled; }
+        // Collision validation needs the physical preparation path, including
+        // unannotated custom motion whose display Z is normally flattened.
+        void preserve_preparation_z(bool preserve) { m_preserve_preparation_z = preserve; }
         void reset();
 
         const GCodeProcessorResult& get_result() const { return m_result; }

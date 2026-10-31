@@ -3692,6 +3692,7 @@ void GCodeProcessor::reset()
     m_zero_layer_height = 0.0f;
     m_first_layer_height = 0.0f;
     m_processing_start_custom_gcode = false;
+    m_preserve_preparation_z = false;
     m_in_config_block = false;
     m_g1_line_id = 0;
     m_layer_id = 0;
@@ -7279,7 +7280,8 @@ void GCodeProcessor::store_move_vertex(EMoveType type, EMovePathType path_type, 
     // is byte-identical.
     // Annotated section travel must also retain actual Z: preview flattening
     // would hide clearance moves from both the viewer and collision checks.
-    const float store_z = (m_processing_start_custom_gcode && m_result.belt_tilt_angle == 0.f && m_cut_segment_id < 0)
+    const float store_z = (m_processing_start_custom_gcode && !m_preserve_preparation_z &&
+        m_result.belt_tilt_angle == 0.f && m_cut_segment_id < 0)
         ? m_first_layer_height
         : m_end_position[Z] - m_z_offset;
 

@@ -3032,6 +3032,7 @@ namespace DoExport {
         processor.initialize_from_context(nozzle_group_result);
         processor.initialize_result_moves();
         processor.apply_config(config);
+        processor.preserve_preparation_z(print.config().enable_nonplanar.value);
         processor.enable_stealth_time_estimator(silent_time_estimator_enabled);
     }
 

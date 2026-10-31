@@ -3898,6 +3898,7 @@ void Print::validate_nonplanar_gcode_file(const std::string &path) const
     // Edited files may have lost the embedded configuration block. Initialize
     // the processor from this print before parsing either annotated or raw XYZ.
     processor.apply_config(m_config);
+    processor.preserve_preparation_z(true);
     const Vec3d origin = get_plate_origin();
     processor.set_xy_offset(origin.x(), origin.y());
     processor.process_file(path);
@@ -5621,6 +5622,7 @@ void Print::export_gcode_from_previous_file(const std::string& file, GCodeProces
 
     try {
         GCodeProcessor processor;
+        processor.preserve_preparation_z(m_config.enable_nonplanar.value);
         GCodeProcessor::s_IsBBLPrinter = is_BBL_printer();
         const Vec3d origin = this->get_plate_origin();
         processor.set_xy_offset(origin(0), origin(1));
@@ -5671,6 +5673,7 @@ void Print::export_gcode_from_previous_file(const std::string& file, GCodeProces
 void Print::reload_gcode_moves(GCodeProcessorResult* result) const
 {
     GCodeProcessor processor;
+    processor.preserve_preparation_z(m_config.enable_nonplanar.value);
     GCodeProcessor::s_IsBBLPrinter = is_BBL_printer();
     const Vec3d origin = this->get_plate_origin();
     processor.set_xy_offset(origin(0), origin(1));

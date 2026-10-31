@@ -28,7 +28,7 @@ using Catch::Matchers::WithinAbs;
 
 namespace {
 
-void process_text(GCodeProcessor &processor, const std::string &text)
+void process_text(GCodeProcessor &processor, const std::string &text, bool preserve_preparation_z = false)
 {
     ScopedTemporaryFile file(".gcode");
     {
@@ -37,6 +37,7 @@ void process_text(GCodeProcessor &processor, const std::string &text)
     }
     processor.reset();
     processor.apply_config(FullPrintConfig{});
+    processor.preserve_preparation_z(preserve_preparation_z);
     processor.process_file(file.string());
 }
 
@@ -109,6 +110,35 @@ TEST_CASE("Section travel retains physical Z during the custom start stage", "[G
         if (move.type == EMoveType::Travel)
             maximum_z = std::max(maximum_z, move.position.z());
     CHECK_THAT(maximum_z, WithinAbs(20.f, 1e-6f));
+}
+
+TEST_CASE("Collision processing retains unannotated preparation travel at its physical height", "[GCodeProcessor][Nonplanar]")
+{
+    GCodeProcessor processor;
+    process_text(processor, "G90\n;TYPE:Custom\nG1 X10 Y10 Z20 F1200\n", true);
+    float maximum_z = 0.f;
+    for (const auto &move : processor.get_result().moves)
+        if (move.type == EMoveType::Travel)
+            maximum_z = std::max(maximum_z, move.position.z());
+    CHECK_THAT(maximum_z, WithinAbs(20.f, 1e-6f));
+}
+
+TEST_CASE("Preparation display height changes only when physical processing is requested", "[GCodeProcessor][Nonplanar]")
+{
+    const bool preserve = GENERATE(false, true);
+    FullPrintConfig config;
+    config.initial_layer_print_height.value = 0.25;
+    GCodeProcessor processor;
+    processor.apply_config(config);
+    processor.preserve_preparation_z(preserve);
+    processor.initialize_result_moves();
+    processor.process_buffer("G90\n;TYPE:Custom\nG1 X10 Y10 Z20 F1200\n");
+    processor.finalize(false);
+    float maximum_z = 0.f;
+    for (const auto &move : processor.get_result().moves)
+        if (move.type == EMoveType::Travel)
+            maximum_z = std::max(maximum_z, move.position.z());
+    CHECK_THAT(maximum_z, WithinAbs(preserve ? 20.f : 0.25f, 1e-6f));
 }
 
 TEST_CASE("Reprocessing ordinary G-code clears earlier section metadata", "[GCodeProcessor][Nonplanar]")
