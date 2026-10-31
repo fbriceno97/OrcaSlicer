@@ -35,6 +35,10 @@ restores the copy's XY placement. Scaling, mirroring and shrinkage remain in the
 geometry; the section-to-world map is rigid. Writer input also contains the
 current G-code origin, which must be subtracted before applying this map. Plate
 and nozzle offsets and Z calibration are physical corrections applied afterward.
+While a section transform is active, custom-G-code position variables use the
+emitted machine coordinates, including plate subtraction. Raw custom G-code does
+not pass through the writer again. Returning a plate-global position here would
+shift a macro move by the plate offset a second time.
 
 A model-space bound `n*x <= d` becomes `n_s*s <= d + n_s*t`, where
 `n_s = inverse(A).transpose()*n`. At each slice height this is an XY half-plane.

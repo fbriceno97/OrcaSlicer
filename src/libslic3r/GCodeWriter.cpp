@@ -122,7 +122,9 @@ Vec3d GCodeWriter::position_for_custom_gcode() const
     if (!m_section_transform)
         return m_pos;
     const Vec3d plate(m_x_offset, m_y_offset, 0.);
-    return map_section_point(m_pos - plate) + plate;
+    // Raw custom G-code bypasses the writer's plate subtraction. Its position
+    // variables must match the coordinates actually emitted to the machine.
+    return map_section_point(m_pos - plate);
 }
 
 void GCodeWriter::set_position_from_custom_gcode(const Vec3d &position)
@@ -135,7 +137,7 @@ void GCodeWriter::set_position_from_custom_gcode(const Vec3d &position)
         throw std::invalid_argument("Custom G-code position must be finite");
     const Vec3d plate(m_x_offset, m_y_offset, 0.);
     const Vec3d offset = section_physical_offset();
-    m_pos = m_section_transform->inverse() * (position - plate - offset) + offset + plate;
+    m_pos = m_section_transform->inverse() * (position - offset) + offset + plate;
     m_lifted = m_to_lift = 0.;
 }
 

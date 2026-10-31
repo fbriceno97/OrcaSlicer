@@ -148,12 +148,12 @@ TEST_CASE("Section motion leaves physical calibration outside the build-frame ro
             emitted = Vec3d(line.new_X(state), line.new_Y(state), line.new_Z(state));
     });
     CHECK_THAT((emitted - expected).norm(), Catch::Matchers::WithinAbs(0., 0.002));
-    CHECK_THAT((writer.position_for_custom_gcode() - Vec3d(100., 200., 0.) - expected).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    CHECK_THAT((writer.position_for_custom_gcode() - expected).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
     const Vec3d after_macro(120., 230., 80.);
     writer.set_position_from_custom_gcode(after_macro);
     CHECK_THAT((writer.position_for_custom_gcode() - after_macro).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
     writer.set_section_transform(std::nullopt);
-    CHECK_THAT((writer.get_position() - after_macro).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    CHECK_THAT((writer.get_position() - after_macro - Vec3d(100., 200., 0.)).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
 }
 
 TEST_CASE("Tilted arcs emit linear XYZ moves without changing their extrusion amount", "[GCodeWriter][Nonplanar]")
@@ -196,6 +196,7 @@ TEST_CASE("Tilted arcs emit linear XYZ moves without changing their extrusion am
 
 TEST_CASE("Custom templates exchange machine positions while generated motion stays in a section frame", "[GCodeWriter][Nonplanar]")
 {
+    const bool shifted_plate = GENERATE(false, true);
     struct TemplateGCode : GCode {
         void initialize()
         {
@@ -209,6 +210,8 @@ TEST_CASE("Custom templates exchange machine positions while generated motion st
         }
     } generator;
     generator.initialize();
+    if (shifted_plate)
+        generator.writer().set_xy_offset(100., 200.);
     Transform3d frame = Transform3d::Identity();
     frame.rotate(Eigen::AngleAxisd(Geometry::deg2rad(30.), Vec3d::UnitY()));
     frame.translation() = Vec3d(5., 7., 10.);
@@ -225,7 +228,9 @@ TEST_CASE("Custom templates exchange machine positions while generated motion st
     });
     CHECK_THAT((command - Vec3d(12., 15., 20.)).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
     CHECK_THAT((generator.writer().position_for_custom_gcode() - Vec3d(16., 15., 25.)).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
-    CHECK_THAT((generator.writer().get_position() - frame.inverse() * Vec3d(16., 15., 25.)).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    const Vec3d plate = shifted_plate ? Vec3d(100., 200., 0.) : Vec3d(0., 0., 0.);
+    CHECK_THAT((generator.writer().get_position() - frame.inverse() * (Vec3d(16., 15., 25.) + plate)).norm(),
+        Catch::Matchers::WithinAbs(0., 1e-9));
 }
 
 TEST_CASE("Belt machine coordinates retain a non-45-degree slicing angle", "[GCodeWriter][belt]")
