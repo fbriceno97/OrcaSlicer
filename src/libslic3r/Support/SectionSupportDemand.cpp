@@ -293,7 +293,7 @@ void generate_section_support_family(const SectionSupportFamily &family,
         if (child->has_support() && is_tree(child->config().support_type.value) &&
             (!child->segment_support_demand().empty() || !child->segment_body_demand().empty()))
             throw SlicingError(_u8L("Plane sections with inherited support load currently require normal supports."));
-        child->slicing_parameters();
+        child->update_slicing_parameters();
         child->generate_support_material(false);
         if (child->segment()->is_root())
             continue;

@@ -150,6 +150,7 @@ TEST_CASE("A parent generates support for inherited body load and rebuilds it wi
     REQUIRE(families.size() == 1);
     PrintObject &receiver = *families.front().back();
     generate_section_support_family(families.front());
+    CHECK(receiver.slicing_parameters().valid);
     if (child_needs_support) {
         CHECK_FALSE(receiver.segment_support_demand().empty());
         CHECK(receiver.segment_body_demand().empty());
@@ -174,6 +175,7 @@ TEST_CASE("A parent generates support for inherited body load and rebuilds it wi
             (layer.support_layer && layer.support_layer->has_extrusions())));
     }
     generate_section_support_family(families.front());
+    CHECK(receiver.slicing_parameters().valid);
     double rebuilt_volume = 0.;
     for (const SupportLayer *layer : receiver.support_layers())
         rebuilt_volume += layer->support_fills.total_volume();
@@ -278,6 +280,7 @@ TEST_CASE("Tree section families generate independent supports and reject unhand
         REQUIRE_NOTHROW(generate_section_support_family(families.front()));
         for (const PrintObject *section : families.front()) {
             CHECK(section->is_step_done(posSupportMaterial));
+            CHECK(section->slicing_parameters().valid);
             CHECK(section->segment_support_demand().empty());
             CHECK(section->segment_body_demand().empty());
             for (const SupportLayer *layer : section->support_layers())
