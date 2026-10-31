@@ -503,6 +503,8 @@ set(lisbslic3r_sources
     Slicing.hpp
     Support/BeltFloorContext.cpp
     Support/BeltFloorContext.hpp
+    Support/SectionSupportDemand.cpp
+    Support/SectionSupportDemand.hpp
     Support/SegmentSupportBounds.cpp
     Support/SegmentSupportBounds.hpp
     Support/SupportCommon.cpp

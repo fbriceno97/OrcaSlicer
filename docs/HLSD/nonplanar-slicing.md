@@ -67,9 +67,14 @@ clipping inactive. A final containment pass applies to all support generators,
 including classic tree: it clips expanded paths at full bead width and height,
 retains flow metadata and island ordering, opens loops at boundaries, and rebuilds
 support footprints from the resulting paths. It rejects contoured or sloped support
-paths rather than flattening their Z data. Parent support-demand propagation and
-classic tree branch anchoring still require integration before section export can
-be enabled.
+paths rather than flattening their Z data. Support-load projection groups plane sections by stable model-instance identity,
+visits children before receivers and lifts each footprint onto its authored floor
+before changing frames. Independent cutting and build normals therefore retain
+the correct contact position. A receiver carries only load not already caught by
+its material; a shelf that catches load prevents it reappearing below. Projection
+rejects cross-instance handoffs and unrepresentable receiver planes. Parent
+support-demand consumption and classic tree branch anchoring still require
+integration before section export can be enabled.
 
 Derived sections are rejected by print validation, processing, and export while
 safe section transitions and support propagation remain incomplete. A sequential
