@@ -1199,7 +1199,8 @@ std::string GCodeWriter::travel_to_xyz(const Vec3d &point, const std::string &co
         Vec2d delta_no_z = { delta(0), delta(1) };
         //BBS: don'need slope travel because we don't know where is the source position the first time
         //BBS: Also don't need to do slope move or spiral lift if x-y distance is absolute zero
-        if (delta(2) > 0 && delta_no_z.norm() != 0.0f)    {
+        if (delta(2) > 0 && delta_no_z.norm() != 0.0f &&
+            (!section_motion_limits_enabled() || !must_skip_lift_now())) {
             //BBS: SpiralLift
             if (m_to_lift_type == LiftType::SpiralLift && this->is_current_position_clear()) {
                 //BBS: todo: check the arc move all in bed area, if not, then use lazy lift

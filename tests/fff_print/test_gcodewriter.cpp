@@ -2409,3 +2409,34 @@ TEST_CASE("Global spiral lifts retain physical Z speed limits during section exp
     CHECK(feed_commands > 0);
     CHECK_THAT((writer.position_for_custom_gcode() - Vec3d(100., 100., 5.4)).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
 }
+
+TEST_CASE("Deferred section lifts do not start spiral or slope motion from an uncommanded pose", "[GCodeWriter][Nonplanar]")
+{
+    const LiftType lift = GENERATE(LiftType::SpiralLift, LiftType::SlopeLift);
+    PrintConfig config;
+    config.printable_area.values = {Vec2d(0., 0.), Vec2d(250., 0.), Vec2d(250., 250.), Vec2d(0., 250.)};
+    config.enable_arc_fitting.value = true;
+    config.z_hop.values = {0.4};
+    config.retract_lift_above.values = {0.};
+    config.retract_lift_below.values = {0.};
+    GCodeWriter writer;
+    writer.apply_print_config(config);
+    writer.set_extruders({0});
+    writer.set_extruder(0);
+    writer.set_section_motion_limits(true);
+    writer.travel_to_xyz(Vec3d(100., 100., 5.), "", true);
+    writer.get_position().z() = 10.; // planned next layer
+    writer.lazy_lift(lift);
+    const std::string output = writer.travel_to_xyz(Vec3d(120., 120., 10.), "", true);
+    CHECK(output.find("G3") == std::string::npos);
+    GCodeReader reader;
+    size_t moves = 0;
+    reader.parse_buffer(output, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
+        if (line.cmd_is("G1") && line.has(X) && line.has(Y)) {
+            ++moves;
+            CHECK_THAT(line.value(X), Catch::Matchers::WithinAbs(120., 0.001));
+            CHECK_THAT(line.value(Y), Catch::Matchers::WithinAbs(120., 0.001));
+        }
+    });
+    CHECK(moves == 1);
+}
