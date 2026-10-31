@@ -51,6 +51,9 @@ polygons, preserving their material and modifier assignments. Parts belonging to
 another section retain empty slice slots so modifier parent indices remain valid.
 Section processing avoids region bounding-box shortcuts whose coordinates belong
 to the ordinary slicing frame.
+Bounds are reapplied after conical overhang processing and contour compensation,
+including uncompensated first-layer outlines, so these operations cannot grow
+material back across a cut after the initial mesh clipping.
 
 Normal and organic support installation clips generated layer polygons and
 contact, overhang and enforcer footprints against the section's bounds over the

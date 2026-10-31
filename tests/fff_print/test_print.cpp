@@ -191,9 +191,12 @@ TEST_CASE("Cut sections retain separate instance identities and reuse unchanged 
 TEST_CASE("Section slices stay inside their model-space cut bounds", "[Print][CutPlaneSegmentation]")
 {
     const bool tilted = GENERATE(false, true);
+    const bool compensated = GENERATE(false, true);
     DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
     config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"layer_height", "0.2"},
-        {"initial_layer_print_height", "0.2"}, {"zaa_enabled", "0"}});
+        {"initial_layer_print_height", "0.2"}, {"zaa_enabled", "0"},
+        {"xy_contour_compensation", compensated ? "1" : "0"},
+        {"make_overhang_printable", compensated ? "1" : "0"}});
     Print print;
     Model model;
     init_print({cube(20.)}, print, model, config);

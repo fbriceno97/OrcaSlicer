@@ -1343,6 +1343,30 @@ void apply_fuzzy_skin_segmentation(PrintObject &print_object, ThrowOnCancel thro
 // Resulting expolygons of layer regions are marked as Internal.
 //
 // this should be idempotent
+static ExPolygons clip_section_slices(ExPolygons slices, const PrintObject &object, double slice_z, double layer_height)
+{
+    if (!object.segment() || slices.empty())
+        return slices;
+    const Transform3d frame = object.trafo_sliced();
+    const Matrix3d normal_to_slice = frame.linear().inverse().transpose();
+    for (const CutSegmentClip &clip : object.segment()->clips) {
+        const Vec3d normal = normal_to_slice * clip.normal;
+        double limit = clip.offset + normal.dot(frame.translation()) - normal.z() * slice_z;
+        if (clip.role == CutClipRole::Bed)
+            limit -= 0.5 * layer_height * std::abs(normal.z());
+        if (normal.head<2>().norm() < EPSILON) {
+            if (limit < -EPSILON)
+                slices.clear();
+        } else {
+            const BoundingBox bounds = get_extents(slices);
+            slices = clip_expolygons_by_half_plane(std::move(slices), normal.head<2>(), limit, bounds);
+        }
+        if (slices.empty())
+            break;
+    }
+    return slices;
+}
+
 void PrintObject::slice_volumes()
 {
     BOOST_LOG_TRIVIAL(info) << "Slicing volumes..." << log_memory_info();
@@ -1401,25 +1425,9 @@ void PrintObject::slice_volumes()
     for (size_t region_id = 0; region_id < region_slices.size(); ++ region_id) {
         std::vector<ExPolygons> &by_layer = region_slices[region_id];
         for (size_t layer_id = 0; layer_id < by_layer.size(); ++ layer_id) {
-            if (m_segment && !by_layer[layer_id].empty()) {
-                const Transform3d frame = this->trafo_sliced();
-                for (const CutSegmentClip &clip : m_segment->clips) {
-                    const Vec3d normal = frame.linear().inverse().transpose() * clip.normal;
-                    double limit = clip.offset + normal.dot(frame.translation()) - normal.z() * slice_zs[layer_id];
-                    if (clip.role == CutClipRole::Bed)
-                        limit -= 0.5 * m_layers[layer_id]->height * std::abs(normal.z());
-                    if (normal.head<2>().norm() < EPSILON) {
-                        if (limit < -EPSILON)
-                            by_layer[layer_id].clear();
-                    } else {
-                        const BoundingBox bounds = get_extents(by_layer[layer_id]);
-                        by_layer[layer_id] = clip_expolygons_by_half_plane(std::move(by_layer[layer_id]),
-                            normal.head<2>(), limit, bounds);
-                    }
-                    if (by_layer[layer_id].empty())
-                        break;
-                }
-            }
+            if (m_segment)
+                by_layer[layer_id] = clip_section_slices(std::move(by_layer[layer_id]), *this,
+                    slice_zs[layer_id], m_layers[layer_id]->height);
             m_layers[layer_id]->regions()[region_id]->slices.append(std::move(by_layer[layer_id]), stInternal);
         }
     }
@@ -1595,6 +1603,12 @@ void PrintObject::slice_volumes()
                             }
                         }
 	                }
+                    // Compensation and conical overhang processing may grow
+                    // regions across a cut after the initial mesh clipping.
+                    if (m_segment)
+                        for (LayerRegion *region : layer->regions())
+                            region->slices.set(clip_section_slices(to_expolygons(std::move(region->slices.surfaces)),
+                                *this, layer->slice_z, layer->height), stInternal);
 	                // Merge all regions' slices to get islands, chain them by a shortest path.
 	                layer->make_slices();
 	            }
@@ -1607,6 +1621,9 @@ void PrintObject::slice_volumes()
             //Otherwise the travel of the layer layer would be mess.
             for (int i = 0; i < lslices_elfoot_uncompensated.size(); i++) {
                 ExPolygons &expolygons_uncompensated = lslices_elfoot_uncompensated[i];
+                if (m_segment)
+                    expolygons_uncompensated = clip_section_slices(std::move(expolygons_uncompensated), *this,
+                        m_layers[i]->slice_z, m_layers[i]->height);
                 Points ordering_points;
                 ordering_points.reserve(expolygons_uncompensated.size());
                 for (const ExPolygon &ex : expolygons_uncompensated)
