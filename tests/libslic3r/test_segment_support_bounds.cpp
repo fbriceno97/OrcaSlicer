@@ -146,6 +146,16 @@ TEST_CASE("A vertical floor clips sideways and offers no height to descend to", 
     CHECK_FALSE(region_contains(valid, 0., 0.));
 }
 
+TEST_CASE("Support beads stay above tilted floors for their full layer height", "[cutplanes][supports]")
+{
+    const SegmentSupportBounds bounds(non_root_segment({
+        clip_keeping_above(Vec3d(1., 0., 1.), 0., CutClipRole::Floor)}), Transform3d::Identity());
+    CHECK(region_contains(bounds.valid_region_polygon(0.2), -0.1, 0.));
+    CHECK_FALSE(region_contains(bounds.valid_region_polygon(0.2, 0.2), -0.1, 0.));
+    CHECK(region_contains(bounds.valid_region_polygon(0.2, 0.2), 0.1, 0.));
+    CHECK_THROWS_AS(bounds.valid_region_polygon(0.2, -0.1), std::invalid_argument);
+}
+
 TEST_CASE("Bounds built from a derived segment agree with its cut planes", "[cutplanes][supports]") {
     Model        model;
     ModelObject *mo = model.add_object();

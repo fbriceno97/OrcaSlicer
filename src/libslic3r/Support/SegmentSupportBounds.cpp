@@ -79,6 +79,13 @@ SegmentSupportBounds::SegmentSupportBounds(const PrintObject &object, double bed
     m_active = true;
 }
 
+Polygons SegmentSupportBounds::valid_region_polygon(coordf_t print_z, coordf_t layer_height) const
+{
+    if (!std::isfinite(layer_height) || layer_height < 0.)
+        throw std::invalid_argument("Invalid section support layer height");
+    return intersection(valid_region_polygon(print_z), valid_region_polygon(print_z - layer_height));
+}
+
 Polygons SegmentSupportBounds::valid_region_polygon(coordf_t print_z, const Polygons &column, double overlap) const
 {
     Polygons valid = this->valid_region_polygon(print_z);

@@ -61,6 +61,9 @@ public:
     // XY region at layer print_z where support is ALLOWED: the segment side of ALL bounds
     // (intersection of the half-planes), floors and ceilings alike.
     Polygons valid_region_polygon(coordf_t print_z) const;
+    // Keep the full layer-height span inside the bounds, including a sloped
+    // floor beneath a bead whose nozzle-tip position alone would be valid.
+    Polygons valid_region_polygon(coordf_t print_z, coordf_t layer_height) const;
     // The same, letting support reach `overlap` past the ceilings -- but only inside `column`, the
     // support-on-support column supplied by the caller at this height. Closes
     // the up-to-one-layer seam whole layers leave under a tilted plane; never under the model.

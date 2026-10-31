@@ -85,7 +85,7 @@ TEST_CASE("Section support installation removes layers and contact footprints be
     SupportGeneratorLayersPtr layers;
     const Polygon square({Point::new_scale(-20., -20.), Point::new_scale(20., -20.),
         Point::new_scale(20., 20.), Point::new_scale(-20., 20.)});
-    for (double z : {-1., 5., 11.}) {
+    for (double z : {-1., 0.1, 5., 11.}) {
         SupportGeneratorLayer &layer = storage.allocate_unguarded(SupporLayerType::Base);
         layer.print_z = z;
         layer.height = 0.2;
@@ -98,7 +98,7 @@ TEST_CASE("Section support installation removes layers and contact footprints be
     }
     const SupportGeneratorLayersPtr empty;
     generate_support_layers(root, empty, empty, empty, layers, empty, empty);
-    REQUIRE(root.support_layers().size() == (enabled ? 1 : 3));
+    REQUIRE(root.support_layers().size() == (enabled ? 1 : 4));
     for (const SupportGeneratorLayer *layer : layers) {
         const bool expected_empty = enabled && layer->print_z != 5.;
         CHECK(layer->polygons.empty() == expected_empty);

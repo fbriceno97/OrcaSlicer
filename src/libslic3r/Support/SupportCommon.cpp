@@ -1368,7 +1368,7 @@ SupportGeneratorLayersPtr generate_support_layers(
     if (section_bounds.is_active()) {
         for (SupportGeneratorLayer *layer : layers_sorted) {
             object.print()->throw_if_canceled();
-            const Polygons valid = section_bounds.valid_region_polygon(layer->print_z);
+            const Polygons valid = section_bounds.valid_region_polygon(layer->print_z, layer->height);
             layer->polygons = intersection(layer->polygons, valid);
             for (const auto *footprint : {&layer->contact_polygons, &layer->overhang_polygons, &layer->enforcer_polygons})
                 if (*footprint)
