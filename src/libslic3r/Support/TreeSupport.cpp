@@ -1218,7 +1218,7 @@ void TreeSupport::detect_overhangs(bool check_support_necessity/* = false*/)
         inherited_overhangs.resize(m_object->layer_count());
     const bool organic_load = !inherited_overhangs.empty() && m_support_params.support_style == smsTreeOrganic;
     const size_t organic_gap_layers = organic_load ?
-        TreeSupport3D::TreeSupportSettings(TreeSupport3D::TreeSupportMeshGroupSettings(*m_object)).z_distance_top_layers : 0;
+        TreeSupport3D::TreeSupportSettings(TreeSupport3D::TreeSupportMeshGroupSettings(*m_object), m_slicing_params).z_distance_top_layers : 0;
     const double contact_gap = organic_load ? organic_gap_layers * m_slicing_params.layer_height : top_z_distance;
     const auto contact_height = [&](size_t index) {
         if (organic_load)
