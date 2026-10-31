@@ -120,8 +120,14 @@ The `layer_z` override intersects the local layer plane with a vertical line
 through the last emitted machine XY, including plate/nozzle offsets and Z
 calibration. It does not transform an uncommanded local endpoint, which would
 also move XY on tilted sections. Non-upward planes are rejected. Macros that
-move XY before using this height, raw motion-state changes, and raw
-motion parsing still require separate integration. Whole-layer bed settings are
+move XY before using this height still require separate integration. Within an
+active section, parsed linear/arc XYZ endpoints synchronize the emitted pose,
+including relative moves and temporary inch units. Macros must restore absolute
+XYZ mode and millimeters. Homing and machine-origin/workspace changes reject the
+template rather than leaving a guessed position. Explicit position-variable
+assignments retain their existing authoritative behavior. Startup/global macros,
+conditional firmware moves and raw extrusion state still require integration.
+Whole-layer bed settings are
 limited to an upright root whose slice origin is at the physical bed. Per-path
 first-layer settings use the section point's physical bed height; elevated child
 sections do not restart the bed speed ramp. Section-wide temperature/cooling,

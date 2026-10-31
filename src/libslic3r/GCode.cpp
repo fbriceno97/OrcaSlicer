@@ -83,6 +83,7 @@
 #include <stdexcept>
 #include <set>
 #include <optional>
+#include <initializer_list>
 #include <stdlib.h>
 #include <string>
 #include <system_error>
@@ -827,6 +828,43 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
                 parser.quit_parsing();
         });
         return changes;
+    }
+
+    static std::optional<Vec3d> section_custom_gcode_endpoint(const std::string &gcode, Vec3d position)
+    {
+        bool relative = false, moved = false;
+        double units = 1.;
+        GCodeReader parser;
+        parser.parse_buffer(gcode, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
+            const auto cmd = line.cmd();
+            if (ascii_iequals(cmd, "G90"))
+                relative = false;
+            else if (ascii_iequals(cmd, "G91"))
+                relative = true;
+            else if (ascii_iequals(cmd, "G20"))
+                units = 25.4;
+            else if (ascii_iequals(cmd, "G21"))
+                units = 1.;
+            else if (ascii_iequals(cmd, "G0") || ascii_iequals(cmd, "G1") ||
+                     ascii_iequals(cmd, "G2") || ascii_iequals(cmd, "G3")) {
+                for (const Axis axis : {X, Y, Z})
+                    if (line.has(axis)) {
+                        const double value = double(line.value(axis)) * units;
+                        position[int(axis)] = relative ? position[int(axis)] + value : value;
+                        moved = true;
+                    }
+            } else if ((ascii_iequals(cmd, "G92") && (line.has(X) || line.has(Y) || line.has(Z))) ||
+                       ascii_iequals(cmd, "G28") || ascii_iequals(cmd, "G29") ||
+                       ascii_iequals(cmd, "G53") || ascii_iequals(cmd, "G54") ||
+                       ascii_iequals(cmd, "G55") || ascii_iequals(cmd, "G56") ||
+                       ascii_iequals(cmd, "G57") || ascii_iequals(cmd, "G58") || ascii_iequals(cmd, "G59"))
+                throw std::runtime_error(_u8L("Section custom G-code cannot home axes or change the machine coordinate origin."));
+        });
+        if (relative || units != 1.)
+            throw std::runtime_error(_u8L("Section custom G-code must restore absolute XYZ positioning and millimeter units."));
+        if (!position.allFinite())
+            throw std::runtime_error(_u8L("Section custom G-code produced a nonfinite machine position."));
+        return moved ? std::optional<Vec3d>(position) : std::nullopt;
     }
 
     // Clearance the tower-approach router keeps around the tower: the avoid box is
@@ -5368,12 +5406,16 @@ PlaceholderParserIntegration &ppi = m_placeholder_parser_integration;
         if (motion_state_changes.jerk)
             m_writer.invalidate_jerk();
 
+        const auto raw_endpoint = m_writer.has_section_transform()
+            ? section_custom_gcode_endpoint(output, Vec3d(ppi.position[0], ppi.position[1], ppi.position[2]))
+            : std::nullopt;
         if (const std::vector<double> &pos = ppi.opt_position->values; ppi.position != pos) {
             // Update G-code writer.
             update_position_from_custom_gcode(Vec3d(pos[0], pos[1], pos[2]));
             if (!m_writer.section_motion_limits_enabled())
                 this->set_last_pos(this->gcode_to_point({ pos[0], pos[1] }));
-        }
+        } else if (raw_endpoint)
+            update_position_from_custom_gcode(*raw_endpoint);
 
         for (const Extruder &e : m_writer.extruders()) {
             unsigned int eid = e.id();

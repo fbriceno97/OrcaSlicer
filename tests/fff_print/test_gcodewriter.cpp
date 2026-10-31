@@ -351,6 +351,67 @@ TEST_CASE("Elevated sections do not restart physical bed settings or the bed spe
     }
 }
 
+TEST_CASE("Section raw macros synchronize emitted XYZ after linear arc and relative moves", "[GCodeWriter][Nonplanar]")
+{
+    const bool section = GENERATE(false, true);
+    const bool inches = GENERATE(false, true);
+    struct MacroGCode : GCode {
+        MacroGCode()
+        {
+            PrintConfig config;
+            m_config.apply(config, true);
+            m_writer.apply_print_config(config);
+            m_writer.set_extruders({0});
+            m_writer.set_extruder(0);
+            m_placeholder_parser_integration.init(m_writer);
+        }
+    } generator;
+    generator.writer().set_section_motion_limits(true);
+    generator.writer().set_xy_offset(100., 200.);
+    if (section) {
+        Transform3d frame = Transform3d::Identity();
+        frame.rotate(Eigen::AngleAxisd(Geometry::deg2rad(30.), Vec3d::UnitY()));
+        frame.translation() = Vec3d(5., 7., 10.);
+        generator.writer().set_section_transform(frame);
+    }
+    const Vec3d initial(12., 15., 20.);
+    generator.writer().set_position_from_custom_gcode(initial);
+    const std::string commands = inches ? "G20\nG1 X1\nG21\nG1 Y3\n"
+        : "G91\nG1 X2 Z3\nG90\nG1 Y18\nG2 X20 Y22 I0 J2 Z25\n";
+    const std::string output = generator.placeholder_parser_process("layer_change_gcode", commands, 0);
+    INFO(output);
+    REQUIRE(output.find("!!!!!") == std::string::npos);
+    const Vec3d target = !section ? initial : (inches ? Vec3d(25.4, 3., 20.) : Vec3d(20., 22., 25.));
+    CHECK_THAT((generator.writer().position_for_custom_gcode() - target).norm(), Catch::Matchers::WithinAbs(0., 1e-6));
+    if (section) {
+        const Vec3d logical = generator.writer().get_position();
+        CHECK(generator.last_pos() == generator.gcode_to_point(Vec2d(logical.x(), logical.y())));
+    }
+}
+
+TEST_CASE("Section raw macros reject unrepresentable coordinate state changes", "[GCodeWriter][Nonplanar]")
+{
+    const std::string commands = GENERATE(std::string("G91\nG1 X1\n"), std::string("G20\n"),
+        std::string("G92 Z0\n"), std::string("G28\n"), std::string("G54\n"));
+    struct MacroGCode : GCode {
+        MacroGCode()
+        {
+            PrintConfig config;
+            m_config.apply(config, true);
+            m_writer.apply_print_config(config);
+            m_writer.set_extruders({0});
+            m_writer.set_extruder(0);
+            m_placeholder_parser_integration.init(m_writer);
+        }
+    } generator;
+    generator.writer().set_section_transform(Transform3d::Identity());
+    const Vec3d initial(12., 15., 20.);
+    generator.writer().set_position_from_custom_gcode(initial);
+    const std::string output = generator.placeholder_parser_process("layer_change_gcode", commands, 0);
+    CHECK(output.find("!!!!!") != std::string::npos);
+    CHECK_THAT((generator.writer().position_for_custom_gcode() - initial).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+}
+
 TEST_CASE("Section acceleration bounds print and travel including inherited settings", "[GCodeWriter][Nonplanar]")
 {
     const int context = GENERATE(0, 1, 2); // ordinary, section frame, global section transition
