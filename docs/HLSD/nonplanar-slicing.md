@@ -85,8 +85,9 @@ with separate model-contact gaps and flush support-column contacts. Extra empty
 planning layers let contacts reach the receiving ceiling; they are omitted from
 export and progress counts. Support enable/gap changes invalidate that schedule.
 Slicing-cache equivalence includes section and instance identity, and transient
-load is rebuilt on every family generation. Tree-support inheritance and support
-below floating bases are rejected by the family generator. The section export
+load is rebuilt on every family generation. Tree styles may generate independently when a family has no inherited load.
+A receiver with inherited tree-support load and support below floating bases
+are rejected by the family generator. The section export
 guard remains active.
 
 Derived sections are rejected by print validation, processing, and export while

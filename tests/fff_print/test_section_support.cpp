@@ -8,6 +8,7 @@
 #include "libslic3r/CutPlanes.hpp"
 #include "libslic3r/CutPlaneSegmentation.hpp"
 #include "libslic3r/Print.hpp"
+#include "libslic3r/Exception.hpp"
 #include "libslic3r/GCode.hpp"
 #include "libslic3r/ExtrusionEntityCollection.hpp"
 #include "libslic3r/Model.hpp"
@@ -244,4 +245,43 @@ TEST_CASE("Tree overhang detection treats an inclined section floor as supportin
     }
     if (free_overhang)
         CHECK(overhang_layers > 0);
+}
+
+TEST_CASE("Tree section families generate independent supports and reject unhandled inherited load", "[Nonplanar][Support]")
+{
+    const char *style = GENERATE("tree_hybrid", "organic");
+    const bool inherited_load = GENERATE(false, true);
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"enable_support", "1"},
+        {"support_type", "tree(auto)"}, {"support_style", style},
+        {"layer_height", "0.2"}, {"initial_layer_print_height", "0.2"},
+        {"elefant_foot_compensation", "0"}});
+    TriangleMesh mesh = make_cube(inherited_load ? 4. : 20., 10., 10.);
+    TriangleMesh cap = make_cube(20., 10., 2.);
+    cap.translate(0.f, 0.f, 10.f);
+    mesh.merge(cap);
+    Print print;
+    Model model;
+    Slic3r::Test::init_print({mesh}, print, model, config);
+    ModelObject *object = model.objects.front();
+    object->cut_planes.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(2., 5., 10.);
+    object->cut_planes.planes.push_back(plane);
+    print.apply(model, config);
+    const auto families = section_support_families(print);
+    REQUIRE(families.size() == 1);
+    if (inherited_load) {
+        CHECK_THROWS_AS(generate_section_support_family(families.front()), SlicingError);
+        CHECK_FALSE(families.front().back()->segment_body_demand().empty());
+    } else {
+        REQUIRE_NOTHROW(generate_section_support_family(families.front()));
+        for (const PrintObject *section : families.front()) {
+            CHECK(section->is_step_done(posSupportMaterial));
+            CHECK(section->segment_support_demand().empty());
+            CHECK(section->segment_body_demand().empty());
+            for (const SupportLayer *layer : section->support_layers())
+                CHECK(layer->support_fills.empty());
+        }
+    }
 }

@@ -280,8 +280,6 @@ void generate_section_support_family(const SectionSupportFamily &family,
     };
     for (PrintObject *object : family) {
         check_cancel();
-        if (object->has_support() && is_tree(object->config().support_type.value))
-            throw SlicingError(_u8L("Plane sections with inherited support load currently require normal supports."));
         object->slice();
         object->make_perimeters();
         object->prepare_infill();
@@ -292,6 +290,9 @@ void generate_section_support_family(const SectionSupportFamily &family,
         check_cancel();
         if (!child->segment()->is_root() && !child->segment()->touches_base_plane() && child->has_support())
             throw SlicingError(_u8L("Support below a section's floating base is not supported."));
+        if (child->has_support() && is_tree(child->config().support_type.value) &&
+            (!child->segment_support_demand().empty() || !child->segment_body_demand().empty()))
+            throw SlicingError(_u8L("Plane sections with inherited support load currently require normal supports."));
         child->slicing_parameters();
         child->generate_support_material(false);
         if (child->segment()->is_root())
