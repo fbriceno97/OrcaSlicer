@@ -537,6 +537,7 @@ TEST_CASE("Tilted arcs emit linear XYZ moves without changing their extrusion am
 TEST_CASE("Custom templates exchange machine positions while generated motion stays in a section frame", "[GCodeWriter][Nonplanar]")
 {
     const bool shifted_plate = GENERATE(false, true);
+    const bool mapped_section = GENERATE(false, true);
     struct TemplateGCode : GCode {
         void initialize()
         {
@@ -553,9 +554,12 @@ TEST_CASE("Custom templates exchange machine positions while generated motion st
     if (shifted_plate)
         generator.writer().set_xy_offset(100., 200.);
     Transform3d frame = Transform3d::Identity();
-    frame.rotate(Eigen::AngleAxisd(Geometry::deg2rad(30.), Vec3d::UnitY()));
-    frame.translation() = Vec3d(5., 7., 10.);
-    generator.writer().set_section_transform(frame);
+    if (mapped_section) {
+        frame.rotate(Eigen::AngleAxisd(Geometry::deg2rad(30.), Vec3d::UnitY()));
+        frame.translation() = Vec3d(5., 7., 10.);
+        generator.writer().set_section_transform(frame);
+    } else
+        generator.writer().set_section_motion_limits(true);
     generator.writer().set_position_from_custom_gcode(Vec3d(12., 15., 20.));
     generator.writer().get_position().z() += 10.; // planned layer, no emitted motion
     const std::string output = generator.placeholder_parser_process("machine_end_gcode",
