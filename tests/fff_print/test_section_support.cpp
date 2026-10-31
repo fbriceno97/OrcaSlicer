@@ -27,6 +27,7 @@
 #include <vector>
 #include <cstddef>
 #include <initializer_list>
+#include <utility>
 
 using namespace Slic3r;
 
@@ -128,12 +129,12 @@ TEST_CASE("A parent generates support for inherited body load and rebuilds it wi
 {
     const bool child_needs_support = GENERATE(false, true);
     const bool independent_height = GENERATE(false, true);
-    const bool classic_tree = GENERATE(false, true);
-    CAPTURE(child_needs_support, independent_height, classic_tree);
+    const int style = GENERATE(0, 1, 2);
+    CAPTURE(child_needs_support, independent_height, style);
     DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
     config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"enable_support", "1"},
-        {"support_type", classic_tree ? "tree(auto)" : "normal(auto)"},
-        {"support_style", classic_tree ? "tree_hybrid" : "default"}, {"layer_height", "0.2"},
+        {"support_type", style == 0 ? "normal(auto)" : "tree(auto)"},
+        {"support_style", style == 0 ? "default" : (style == 1 ? "tree_hybrid" : "organic")}, {"layer_height", "0.2"},
         {"initial_layer_print_height", "0.2"}, {"support_top_z_distance", "0.2"},
         {"independent_support_layer_height", "1"}, {"elefant_foot_compensation", "0"}});
     config.set_deserialize_strict("independent_support_layer_height", independent_height ? "1" : "0");
@@ -256,7 +257,7 @@ TEST_CASE("Tree overhang detection treats an inclined section floor as supportin
         CHECK(overhang_layers > 0);
 }
 
-TEST_CASE("Tree section families generate independent supports and reject unhandled inherited load", "[Nonplanar][Support]")
+TEST_CASE("Tree section families generate independent and inherited supports", "[Nonplanar][Support]")
 {
     const bool organic = GENERATE(false, true);
     const char *style = organic ? "organic" : "tree_hybrid";
@@ -281,22 +282,48 @@ TEST_CASE("Tree section families generate independent supports and reject unhand
     print.apply(model, config);
     const auto families = section_support_families(print);
     REQUIRE(families.size() == 1);
-    if (inherited_load && organic) {
-        CHECK_THROWS_AS(generate_section_support_family(families.front()), SlicingError);
+    REQUIRE_NOTHROW(generate_section_support_family(families.front()));
+    if (inherited_load)
         CHECK_FALSE(families.front().back()->segment_body_demand().empty());
-    } else {
-        REQUIRE_NOTHROW(generate_section_support_family(families.front()));
-        if (inherited_load)
-            CHECK_FALSE(families.front().back()->segment_body_demand().empty());
-        for (const PrintObject *section : families.front()) {
-            CHECK(section->is_step_done(posSupportMaterial));
-            CHECK(section->slicing_parameters().valid);
-            if (!inherited_load) {
-                CHECK(section->segment_support_demand().empty());
-                CHECK(section->segment_body_demand().empty());
-                for (const SupportLayer *layer : section->support_layers())
-                    CHECK(layer->support_fills.empty());
-            }
+    for (const PrintObject *section : families.front()) {
+        CHECK(section->is_step_done(posSupportMaterial));
+        CHECK(section->slicing_parameters().valid);
+        if (!inherited_load) {
+            CHECK(section->segment_support_demand().empty());
+            CHECK(section->segment_body_demand().empty());
+            for (const SupportLayer *layer : section->support_layers())
+                CHECK(layer->support_fills.empty());
         }
     }
+}
+
+TEST_CASE("Organic inherited supports reject a variable height contact grid", "[Nonplanar][Support]")
+{
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"enable_support", "1"},
+        {"support_type", "tree(auto)"}, {"support_style", "organic"},
+        {"layer_height", "0.2"}, {"initial_layer_print_height", "0.2"},
+        {"elefant_foot_compensation", "0"}});
+    TriangleMesh mesh = make_cube(4., 10., 10.);
+    TriangleMesh cap = make_cube(20., 10., 2.);
+    cap.translate(0.f, 0.f, 10.f);
+    mesh.merge(cap);
+    Print print;
+    Model model;
+    Slic3r::Test::init_print({mesh}, print, model, config);
+    ModelObject *object = model.objects.front();
+    object->cut_planes.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(2., 5., 10.);
+    object->cut_planes.planes.push_back(plane);
+    DynamicPrintConfig range;
+    range.set_deserialize_strict("layer_height", "0.1");
+    object->layer_config_ranges[{4., 8.}].assign_config(std::move(range));
+    print.apply(model, config);
+    const auto families = section_support_families(print);
+    REQUIRE(families.size() == 1);
+    CHECK_THROWS_AS(generate_section_support_family(families.front()), SlicingError);
+    const PrintObject &receiver = *families.front().back();
+    CHECK_FALSE(receiver.segment_body_demand().empty());
+    CHECK_FALSE(receiver.is_step_done(posSupportMaterial));
 }

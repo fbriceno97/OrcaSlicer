@@ -1216,6 +1216,16 @@ void TreeSupport::detect_overhangs(bool check_support_necessity/* = false*/)
     std::vector<ExPolygons> inherited_overhangs;
     if (!m_object->segment_support_demand().empty() || !m_object->segment_body_demand().empty())
         inherited_overhangs.resize(m_object->layer_count());
+    const bool organic_load = !inherited_overhangs.empty() && m_support_params.support_style == smsTreeOrganic;
+    const size_t organic_gap_layers = organic_load ?
+        TreeSupport3D::TreeSupportSettings(TreeSupport3D::TreeSupportMeshGroupSettings(*m_object)).z_distance_top_layers : 0;
+    const double contact_gap = organic_load ? organic_gap_layers * m_slicing_params.layer_height : top_z_distance;
+    const auto contact_height = [&](size_t index) {
+        if (organic_load)
+            return m_slicing_params.object_print_z_min + m_slicing_params.first_object_layer_height +
+                (double(index) - double(organic_gap_layers) - 1.) * m_slicing_params.layer_height;
+        return m_object->get_layer(index)->bottom_z() - top_z_distance;
+    };
     for (const bool flush : {false, true}) {
         const auto &demand = flush ? m_object->segment_support_demand() : m_object->segment_body_demand();
         for (size_t i = 0; i < demand.size() && i < inherited_overhangs.size(); ++i) {
@@ -1224,10 +1234,10 @@ void TreeSupport::detect_overhangs(bool check_support_necessity/* = false*/)
             Polygons fresh = i + 1 < demand.size() ? diff(demand[i], demand[i + 1]) : demand[i];
             if (fresh.empty())
                 continue;
-            const double target = m_object->get_layer(i)->print_z - (flush ? 0. : top_z_distance);
+            const double target = m_object->get_layer(i)->print_z - (flush ? 0. : contact_gap);
             size_t contact_layer = std::max(size_t(1), i);
             while (contact_layer + 1 < inherited_overhangs.size() &&
-                m_object->get_layer(contact_layer + 1)->bottom_z() - top_z_distance <= target + EPSILON)
+                contact_height(contact_layer + 1) <= target + EPSILON)
                 ++contact_layer;
             append(inherited_overhangs[contact_layer], union_ex(fresh));
         }

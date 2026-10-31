@@ -92,9 +92,11 @@ Slicing-cache equivalence includes section and instance identity, and transient
 load is rebuilt on every family generation. Classic-tree generation seeds fresh inherited footprints on virtual overhang
 rows after island pruning. Those rows account for the tree's contact gap, keeping
 model contacts separate from flush support-column contacts. Overhang category
-pointers are recorded after all seed polygons have been appended. Organic styles
-may generate independently when a family has no inherited load; inherited
-organic load and support below floating bases are rejected by the family generator. The section export
+pointers are recorded after all seed polygons have been appended. Organic
+inheritance maps contacts using the generator's rounded gap-layer count and
+uniform support grid. Receivers with variable layer-height grids are rejected;
+a shorter final planning row does not change the contact grid. Support below
+floating bases is rejected by the family generator. The section export
 guard remains active.
 
 Derived sections are rejected by print validation, processing, and export while

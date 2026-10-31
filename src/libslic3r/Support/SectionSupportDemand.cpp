@@ -4,6 +4,7 @@
 #include "SegmentSupportBounds.hpp"
 #include "../Print.hpp"
 #include "../PrintBase.hpp"
+#include "../Slicing.hpp"
 #include "../PrintConfig.hpp"
 #include "../Exception.hpp"
 #include "../I18N.hpp"
@@ -292,10 +293,18 @@ void generate_section_support_family(const SectionSupportFamily &family,
             throw SlicingError(_u8L("Support below a section's floating base is not supported."));
         const SupportMaterialStyle style = child->config().support_style.value;
         const bool classic_tree = style == smsTreeHybrid || style == smsTreeSlim || style == smsTreeStrong;
-        if (child->has_support() && is_tree(child->config().support_type.value) && !classic_tree &&
-            (!child->segment_support_demand().empty() || !child->segment_body_demand().empty()))
-            throw SlicingError(_u8L("Inherited section loads require normal or classic tree supports."));
         child->update_slicing_parameters();
+        if (child->has_support() && is_tree(child->config().support_type.value) && !classic_tree &&
+            (!child->segment_support_demand().empty() || !child->segment_body_demand().empty())) {
+            const auto &parameters = child->slicing_parameters();
+            const auto layers = child->layers();
+            // Organic support indexes a uniform grid. A final precise-height
+            // planning row may be shorter, but earlier rows must match it.
+            for (size_t i = 0; i + 1 < layers.size(); ++i)
+                if (std::abs(layers[i]->print_z - (parameters.object_print_z_min +
+                        parameters.first_object_layer_height + i * parameters.layer_height)) > EPSILON)
+                    throw SlicingError(_u8L("Organic inherited section supports require uniform layer heights."));
+        }
         child->generate_support_material(false);
         if (child->segment()->is_root())
             continue;
