@@ -61,7 +61,7 @@ protected:
 
     // UNLAYERED_MOD -- greyed out unless the selected printer has non-planar printing on. Cut
     // planes are meaningless otherwise: the object slices in one piece regardless of how many
-    // planes are authored. Matches GLGizmoSkeleton, which gates the same way.
+    // planes are authored.
     bool on_is_activable() const override;
 
     void on_set_state() override;
@@ -191,7 +191,7 @@ private:
     // Stored planes render as dimmed quads (the bound one is drawn by the base at the gizmo pose).
     void render_stored_planes();
     // Per-plane intersection contours with the object, sliced in the object-local frame and
-    // rendered under the instance matrix (GLGizmoSkeleton::precompute_cut_contours pattern).
+    // rendered under the instance matrix.
     void precompute_plane_contours();
     void render_plane_contours();
     // Pick the closest unbound stored plane quad under the mouse; -1 if none.
