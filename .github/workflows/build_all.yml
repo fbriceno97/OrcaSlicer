@@ -4,9 +4,11 @@
 name: Custom Orca — Windows x64 build and Unlayered readiness
 
 on:
+  # Experimental commits are validated by the existing draft PR's synchronize
+  # event. Running both push and PR for each head cancels identical jobs and can
+  # leave the replacement waiting for a canceled hosted runner to release its slot.
   push:
     branches:
-      - feature/unlayered-wave-nonplanar
       - release/*
     paths:
       - 'src/**'
@@ -35,8 +37,8 @@ permissions:
   actions: read
 
 concurrency:
-  # Push and PR synchronization for the same head validate one revision.
-  # Different heads can finish unit tests while the next compiler run starts.
+  # Different PR heads can finish unit tests while the next compiler run starts.
+  # The compiler and unit-test jobs below each serialize their own heavy work.
   group: custom-win-x64-${{ github.head_ref || github.ref_name }}-${{ github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: true
 
