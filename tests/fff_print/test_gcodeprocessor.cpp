@@ -551,25 +551,52 @@ TEST_CASE("Each sliced cube's center of mass is its center, and the brim lowers 
     CHECK(center_of(plate).z() < center_of(objects).z());
 }
 
-TEST_CASE("Each cube's raft is its support, centered below it", "[GCodeProcessor]")
+TEST_CASE("Raft mass stays below isolated cubes and is conserved for touching cubes", "[GCodeProcessor]")
 {
+    const bool separated = GENERATE(true, false);
+    INFO(separated ? "isolated rafts" : "touching cubes with overlapping rafts");
     DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
     config.set_deserialize_strict({ { "skirt_loops", 0 }, { "brim_type", "no_brim" }, { "raft_layers", 3 } });
     Print print;
     Model model;
     Test::init_print({ Test::cube(20), Test::cube(20) }, print, model, config);
+    // Do not let packing decide whether this fixture has shared support. A support
+    // bead near two objects is assigned to the nearest footprint, so the centroid
+    // attributed to one of two overlapping rafts need not be its object's center.
+    const double offset = separated ? 40. : 10.;
+    model.objects[0]->instances.front()->set_offset(Vec3d(-offset, 0., 0.));
+    model.objects[1]->instances.front()->set_offset(Vec3d(offset, 0., 0.));
+    for (ModelObject *object : model.objects)
+        object->invalidate_bounding_box();
+    const double gap = model.objects[1]->instance_bounding_box(0).min.x() -
+                       model.objects[0]->instance_bounding_box(0).max.x();
+    REQUIRE_THAT(gap, Catch::Matchers::WithinAbs(separated ? 60. : 0., 1e-6));
+    print.apply(model, config);
     GCodeProcessorResult result;
     Test::gcode(print, &result);
 
+    REQUIRE(result.object_masses.size() == 2);
     REQUIRE(result.support_masses.size() == 2);
+    GCodeProcessorResult::ObjectMass::Sum supports, objects;
     for (size_t i = 0; i < 2; ++i) {
-        const GCodeProcessorResult::ObjectMass::Sum support = result.support_masses[i].total();
-        const Vec3d                                 object  = center_of(result.object_masses[i].total());
+        const auto support = result.support_masses[i].total();
+        const auto object = result.object_masses[i].total();
         REQUIRE(support.mass > 0.);
-        CHECK_THAT(center_of(support).x(), Catch::Matchers::WithinAbs(object.x(), 1.));
-        CHECK_THAT(center_of(support).y(), Catch::Matchers::WithinAbs(object.y(), 1.));
+        if (separated) {
+            CHECK_THAT(center_of(support).x(), Catch::Matchers::WithinAbs(center_of(object).x(), 1.));
+            CHECK_THAT(center_of(support).y(), Catch::Matchers::WithinAbs(center_of(object).y(), 1.));
+        }
         CHECK(center_of(support).z() < 1.);
+        supports.add(support);
+        objects.add(object);
     }
+    // Shared support must still be centered under the pair and counted exactly once.
+    CHECK_THAT(center_of(supports).x(), Catch::Matchers::WithinAbs(center_of(objects).x(), 0.5));
+    CHECK_THAT(center_of(supports).y(), Catch::Matchers::WithinAbs(center_of(objects).y(), 0.5));
+    CHECK_THAT(objects.mass + supports.mass,
+               Catch::Matchers::WithinRel(result.plate_mass.total().mass, 1e-6));
+    CHECK_THAT(objects.volume + supports.volume,
+               Catch::Matchers::WithinRel(result.plate_mass.total().volume, 1e-6));
 }
 
 TEST_CASE("A spiral vase cube counts all its extrusions, rising through each layer", "[GCodeProcessor]")

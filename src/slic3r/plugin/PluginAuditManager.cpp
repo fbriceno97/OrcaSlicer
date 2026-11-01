@@ -597,6 +597,15 @@ std::vector<std::string> PluginAuditManager::default_denied_filenames()
         GCODEVIEWER_APP_KEY ".conf",
         SLIC3R_APP_KEY ".ini",
         GCODEVIEWER_APP_KEY ".ini",
+        // Imported and legacy slicer configuration must remain host-managed as well.
+        "Unlayered Slicer.conf",
+        "Unlayered Slicer.ini",
+        "UnlayeredSlicerGcodeViewer.conf",
+        "UnlayeredSlicerGcodeViewer.ini",
+        "OrcaSlicer.conf",
+        "OrcaSlicer.ini",
+        "OrcaSlicerGcodeViewer.conf",
+        "OrcaSlicerGcodeViewer.ini",
         secret_constants::USER_SECRET_FILENAME,
         ".install_state.json",
     };

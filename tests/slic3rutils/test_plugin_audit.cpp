@@ -104,6 +104,10 @@ TEST_CASE("Plugin audit denies host-managed filenames anywhere", "[audit]")
     {
         CHECK(mgr.is_denied_filename(fs::path("unlayered slicer.conf")));
         CHECK(mgr.is_denied_filename(fs::path("UNLAYERED SLICER.CONF")));
+        CHECK(mgr.is_denied_filename(fs::path("unlayeredcustombeta.conf")));
+        CHECK(mgr.is_denied_filename(fs::path("UNLAYEREDCUSTOMBETA.CONF")));
+        CHECK(mgr.is_denied_filename(fs::path("OrcaSlicer.conf")));
+        CHECK(mgr.is_denied_filename(fs::path("orcaslicergcodeviewer.ini.bak")));
         CHECK(mgr.is_denied_filename(fs::path("ORCA_REFRESH_TOKEN.SEC")));
     }
 

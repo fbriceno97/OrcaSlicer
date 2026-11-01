@@ -16,6 +16,17 @@ permissions:
   contents: read
   actions: write
 jobs:
+  homepage-login:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install browser test driver
+        run: python -m pip install playwright==1.62.0
+      - name: Check login panel with a mocked native bridge
+        run: python scripts/test_homepage_login.py
   wait-for-dependencies:
     if: ${{ inputs.dependency-warmup-run != '' }}
     runs-on: ubuntu-24.04
@@ -50,8 +61,8 @@ jobs:
           echo "::error::Timed out waiting for the dependency cache."
           exit 1
   windows-x64:
-    needs: wait-for-dependencies
-    if: ${{ !cancelled() && (needs.wait-for-dependencies.result == 'success' || needs.wait-for-dependencies.result == 'skipped') }}
+    needs: [homepage-login, wait-for-dependencies]
+    if: ${{ !cancelled() && needs.homepage-login.result == 'success' && (needs.wait-for-dependencies.result == 'success' || needs.wait-for-dependencies.result == 'skipped') }}
     uses: ./.github/workflows/build_check_cache.yml
     with:
       os: windows-latest
