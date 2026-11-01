@@ -10,9 +10,10 @@ $betaInstall = Join-Path $env:ProgramFiles 'OrcaSlicer BambuConnect'
 $betaData = Join-Path $env:APPDATA 'OrcaSlicer'
 $betaKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\OrcaSlicer BambuConnect'
 $customKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\UnlayeredCustomBeta'
+$customShortcut = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Unlayered Custom Beta.lnk'
 
 # Refuse to replace any pre-existing installation, profile, or registry entry.
-foreach ($path in @($target, $betaInstall, $betaData, $betaKey, $customKey)) {
+foreach ($path in @($target, $betaInstall, $betaData, $betaKey, $customKey, $customShortcut)) {
     if (Test-Path $path) { throw "Test needs a clean disposable runner; already exists: $path" }
 }
 $sentinel = [guid]::NewGuid().ToString()
@@ -42,6 +43,7 @@ try {
         throw 'Installed executable has the wrong product identity'
     }
     if (-not (Test-Path $customKey)) { throw 'Separate custom uninstall entry is missing' }
+    if (-not (Test-Path $customShortcut)) { throw 'Custom desktop shortcut is missing' }
 
     $uninstaller = Join-Path $target 'Uninstall.exe'
     if (-not (Test-Path $uninstaller)) { throw 'Custom uninstaller is missing' }
@@ -51,6 +53,7 @@ try {
     Assert-Beta5Unchanged
     if (Test-Path $exe) { throw 'Custom executable remained after uninstall' }
     if (Test-Path $customKey) { throw 'Custom uninstall entry remained after uninstall' }
+    if (Test-Path $customShortcut) { throw 'Custom desktop shortcut remained after uninstall' }
     Write-Output 'PASS: synthetic Beta 5 install/profile/registry sentinels survived custom install and uninstall.'
     Write-Output 'This does not verify an existing real Beta 5 installation or interactive GUI behavior.'
 } finally {

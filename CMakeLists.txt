@@ -1437,7 +1437,7 @@ set (CPACK_NSIS_INSTALLED_ICON_NAME "unlayered-slicer.exe")
 set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS "
     \\\${If} $UPDATE_MODE != \\\"1\\\"
     \\\${OrIf} $DESKTOP_LINK_EXISTED == \\\"1\\\"
-      CreateShortCut \\\"$DESKTOP\\\\UnlayeredCustomBeta.lnk\\\" \\\"$INSTDIR\\\\unlayered-slicer.exe\\\"
+      CreateShortCut \\\"$DESKTOP\\\\Unlayered Custom Beta.lnk\\\" \\\"$INSTDIR\\\\unlayered-slicer.exe\\\"
     \\\${EndIf}
 ")
 set (CPACK_PACKAGE_CHECKSUM SHA256)
