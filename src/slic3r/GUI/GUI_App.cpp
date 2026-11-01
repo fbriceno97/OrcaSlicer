@@ -6021,12 +6021,29 @@ void GUI_App::ShowDownNetPluginDlg() {
 
 void GUI_App::ShowUserLogin(bool show, const std::string& provider)
 {
-    // Show user Login Dialog for specified cloud
+    // Enabling the optional Bambu account may happen after the agents were built.
+    // Rebuild through the normal callback-wiring path before opening its login dialog.
     if (show) {
+        if (!m_agent)
+            return;
+        if (provider == BBL_CLOUD_PROVIDER && !m_agent->get_cloud_agent(provider)) {
+            if (!app_config->has_cloud_provider(provider))
+                return;
+            if (!BBLNetworkPlugin::instance().is_loaded()) {
+                ShowDownNetPluginDlg();
+                return;
+            }
+            restart_networking();
+        }
+        const auto cloud_agent = m_agent ? m_agent->get_cloud_agent(provider) : nullptr;
+        if (!cloud_agent) {
+            show_error(mainframe, _L("The selected cloud provider is unavailable. Check the network plug-in and try again."));
+            return;
+        }
         try {
             delete login_dlg;
-            auto cloud_agent = m_agent->get_cloud_agent(provider);
-            login_dlg        = new ZUserLogin(cloud_agent);
+            login_dlg = nullptr;
+            login_dlg = new ZUserLogin(cloud_agent);
             login_dlg->ShowModal();
         } catch (std::exception &) {
             ;

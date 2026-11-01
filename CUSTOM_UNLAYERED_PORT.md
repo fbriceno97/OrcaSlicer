@@ -49,3 +49,11 @@ still require runtime verification. Source inspection is not GUI verification.
 Local isolated bucket traversal matches pinned Beta 5 in all 216 synthetic cases.
 This check does not exercise native mesh adjacency/subdivision, painting controls,
 undo, project round-tripping, preview, cloud access or physical printing.
+
+The extracted selector fixture comparison also matches pinned Beta 5: split brushes,
+scaled height bands, dense sphere and large-brush geometry/state results. Output
+SHA256: 8672972f299eaab52cc915e8929b8d52f89275124459b5a78fbe31b7f7080eef.
+It uses Eigen 5.0.1 verified against the base dependency's SHA256. This is an
+isolated dependency facade, not the native Catch2 suite or interactive GUI.
+
+New draft PR: https://github.com/fbriceno97/OrcaSlicer/pull/3.
