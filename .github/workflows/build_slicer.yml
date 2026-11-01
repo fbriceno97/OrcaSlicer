@@ -497,6 +497,15 @@ jobs:
         # the checkout cpack re-installs from when it builds the NSIS installer.
         run: scripts\build_preset_cache.bat --prune-source "%BUILD_DIR%" "resources\profiles" "%BUILD_DIR%\UnlayeredSlicer\resources\profiles"
 
+      - name: Exercise Windows application CLI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          UNLAYERED_NO_TELEMETRY: 1
+        run: |
+          python tools/cli_smoke.py --exe "$env:BUILD_DIR/UnlayeredSlicer/unlayered-slicer.exe" --datadir "$env:RUNNER_TEMP/unlayered-custom-cli-smoke" --verbose
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Pack unit tests Win
         if: runner.os == 'Windows'
         working-directory: ${{ github.workspace }}
