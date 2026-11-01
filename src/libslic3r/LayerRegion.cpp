@@ -15,6 +15,7 @@
 #include "Print.hpp"
 #include "PrintConfig.hpp"
 #include "Surface.hpp"
+#include "SurfaceCollection.hpp"
 #include "BoundingBox.hpp"
 #include "SVG.hpp"
 #include "Algorithm/RegionExpansion.hpp"
@@ -147,6 +148,8 @@ void LayerRegion::make_perimeters(const SurfaceCollection &slices, const LayerRe
         fill_no_overlap
     );
     
+    Polygons wave_coverage;
+    g.wave_overhang_coverage = &wave_coverage;
     if (this->layer()->upper_layer != NULL)
         g.upper_slices = &this->layer()->upper_layer->lslices;
 
@@ -170,6 +173,14 @@ void LayerRegion::make_perimeters(const SurfaceCollection &slices, const LayerRe
         g.process_arachne();
     else
         g.process_classic();
+    // A perimeter pass may join compatible regions. Split its wave footprint
+    // back onto every source region before using per-region floor settings.
+    wave_coverage = union_(wave_coverage);
+    for (LayerRegion *region : compatible_regions) {
+        region->wave_overhang_coverage.clear();
+        if (!wave_coverage.empty())
+            region->wave_overhang_coverage = intersection(wave_coverage, to_polygons(region->slices.surfaces));
+    }
 }
 
 #if 1

@@ -1361,6 +1361,8 @@ void PerimeterGenerator::apply_extra_perimeters(ExPolygons &infill_area, Extrusi
             return {std::move(result.paths), std::move(result.residual)};
         }();
         if (!extra_perimeters.empty()) {
+            if (use_waves && wave_overhang_coverage != nullptr)
+                polygons_append(*wave_overhang_coverage, filled_area);
             if (island_perimeters == nullptr) {
                 auto collection = std::make_unique<ExtrusionEntityCollection>();
                 this->loops->entities.push_back(collection.get());

@@ -171,6 +171,11 @@ bool Layer::is_perimeter_compatible(const Print& print, const PrintRegion& a, co
         && config.gap_infill_speed.get_at(print.get_extruder_id(config.outer_wall_filament_id)) == other_config.gap_infill_speed.get_at(print.get_extruder_id(config.outer_wall_filament_id))
         && config.filter_out_gap_fill.value == other_config.filter_out_gap_fill.value
 		&& config.detect_overhang_wall                   == other_config.detect_overhang_wall
+        && config.wave_overhangs == other_config.wave_overhangs
+        && (!config.wave_overhangs.value ||
+            (config.wave_overhang_line_spacing == other_config.wave_overhang_line_spacing &&
+             config.wave_overhang_speed == other_config.wave_overhang_speed &&
+             config.wave_overhang_fan_speed == other_config.wave_overhang_fan_speed))
 		&& config.unsupported_wall_last                  == other_config.unsupported_wall_last
 		&& config.overhang_reverse                       == other_config.overhang_reverse
 		&& config.overhang_reverse_threshold             == other_config.overhang_reverse_threshold
@@ -205,6 +210,8 @@ bool Layer::is_perimeter_compatible(const Print& print, const PrintRegion& a, co
 void Layer::make_perimeters()
 {
     BOOST_LOG_TRIVIAL(trace) << "Generating perimeters for layer " << this->id();
+    for (LayerRegion *region : m_regions)
+        region->wave_overhang_coverage.clear();
 
     const auto clear_generated_extrusions = [](LayerRegion *layer_region) {
         layer_region->perimeters.clear();

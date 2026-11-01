@@ -12,6 +12,9 @@
 #include <fstream>
 #include <ios>
 #include <string>
+#include <sstream>
+#include <vector>
+#include <utility>
 #include <boost/filesystem/path.hpp>
 #include <boost/filesystem/operations.hpp>
 #include "libslic3r/ExtrusionEntity.hpp"
@@ -21,6 +24,12 @@
 #include "libslic3r/Print.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Config.hpp"
+#include "libslic3r/libslic3r.h"
+#include "libslic3r/ClipperUtils.hpp"
+#include "libslic3r/ExPolygon.hpp"
+#include "libslic3r/Polygon.hpp"
+#include "libslic3r/Surface.hpp"
+#include "libslic3r/SurfaceCollection.hpp"
 #include "libslic3r/CutPlanes.hpp"
 #include "libslic3r/CutPlaneSegmentation.hpp"
 #include "libslic3r/Geometry.hpp"
@@ -111,11 +120,151 @@ TEST_CASE("Wave-overhangs are disabled unless the user opts in", "[WaveOverhangs
     CHECK(count_waves(normal) == 0);
 }
 
+TEST_CASE("Wave floors reinforce their covered area for the requested rows and reset on reslicing", "[WaveOverhangs][Windows]")
+{
+    const bool sections = GENERATE(false, true);
+    INFO("cut-plane sections " << sections);
+    DynamicPrintConfig config = settings(true);
+    config.set_deserialize_strict({{"enable_nonplanar", sections ? "1" : "0"}, {"print_sequence", "by object"},
+        {"enable_prime_tower", "0"}, {"skirt_loops", "0"}, {"brim_type", "no_brim"},
+        {"top_shell_layers", "0"}, {"bottom_shell_layers", "0"},
+        {"top_shell_thickness", "0"}, {"bottom_shell_thickness", "0"},
+        {"detect_narrow_internal_solid_infill", "0"}, {"infill_combination", "0"},
+        {"wave_overhang_floor_layers", "0"}, {"use_relative_e_distances", "1"},
+        {"travel_speed_z", "4"}, {"machine_start_gcode", "G90\nM83\nG1 X0 Y0 Z2 F240\n"},
+        {"machine_end_gcode", "M400\n"}, {"before_layer_change_gcode", ""},
+        {"layer_change_gcode", "G92 E0\nG1 Z{layer_z}\n"}, {"time_lapse_gcode", ""}});
+    Print print;
+    Model model;
+    Test::init_print({unsupported_shelf()}, print, model, config);
+    model.objects.front()->instances.front()->set_offset(Vec3d(60., 60., 0.));
+    if (sections) {
+        model.objects.front()->cut_planes.enabled = true;
+        CutPlane plane;
+        plane.point = Vec3d(5., 5., 5.);
+        model.objects.front()->cut_planes.planes.push_back(plane);
+    }
+    print.apply(model, config);
+    const auto commands = [](const std::string &program) {
+        std::vector<std::string> result;
+        std::istringstream input(program);
+        for (std::string line; std::getline(input, line);)
+            if (!line.empty() && line.front() != ';')
+                result.push_back(line);
+        return result;
+    };
+    const std::string original = Test::gcode(print);
+    struct Row { Polygons sparse; Polygons waves; };
+    std::vector<std::vector<Row>> baseline;
+    size_t source_rows = 0;
+    for (const PrintObject *object : print.objects()) {
+        std::vector<Row> rows;
+        for (const Layer *layer : object->layers()) {
+            Row row;
+            for (const LayerRegion *region : layer->regions()) {
+                polygons_append(row.waves, region->wave_overhang_coverage);
+                for (const Surface &surface : region->fill_surfaces.surfaces)
+                    if (surface.surface_type == stInternal)
+                        polygons_append(row.sparse, to_polygons(surface.expolygon));
+            }
+            if (!row.waves.empty())
+                ++source_rows;
+            rows.emplace_back(std::move(row));
+        }
+        baseline.emplace_back(std::move(rows));
+    }
+    REQUIRE(source_rows > 0);
+    config.set_deserialize_strict("wave_overhang_floor_layers", "3");
+    print.apply(model, config);
+    GCodeProcessorResult result;
+    const std::string reinforced = Test::gcode(print, &result);
+    size_t reinforced_rows = 0, unreinforced_rows = 0;
+    REQUIRE(print.objects().size() == baseline.size());
+    for (size_t object_id = 0; object_id < baseline.size(); ++object_id) {
+        const auto &rows = baseline[object_id];
+        const auto &layers = print.get_object(object_id)->layers();
+        REQUIRE(layers.size() == rows.size());
+        Polygons all_waves;
+        for (const Row &row : rows)
+            polygons_append(all_waves, row.waves);
+        all_waves = offset(union_(all_waves), -scaled<double>(1.));
+        for (size_t i = 0; i < rows.size(); ++i) {
+            Polygons mask;
+            for (size_t j = i > 3 ? i - 3 : 0; j < i; ++j)
+                polygons_append(mask, rows[j].waves);
+            const Polygons expected = intersection(rows[i].sparse, intersection(union_(mask), all_waves));
+            Polygons solid, sparse;
+            for (const LayerRegion *region : layers[i]->regions())
+                for (const Surface &surface : region->fill_surfaces.surfaces)
+                    if (surface.is_solid())
+                        polygons_append(solid, to_polygons(surface.expolygon));
+                    else if (surface.surface_type == stInternal)
+                        polygons_append(sparse, to_polygons(surface.expolygon));
+            if (area(expected) * SCALING_FACTOR * SCALING_FACTOR > 1.) {
+                CHECK(area(diff(expected, union_(solid))) <= area(expected) * 0.01);
+                ++reinforced_rows;
+            } else if (mask.empty()) {
+                const Polygons ordinary = intersection(rows[i].sparse, all_waves);
+                if (area(ordinary) * SCALING_FACTOR * SCALING_FACTOR > 1.) {
+                    CHECK(area(diff(ordinary, union_(sparse))) <= area(ordinary) * 0.01);
+                    ++unreinforced_rows;
+                }
+            }
+        }
+    }
+    CHECK(reinforced_rows == 3);
+    CHECK(unreinforced_rows > 0);
+    CHECK_NOTHROW(print.validate_nonplanar_gcode(result));
+    preserve_gcode_fixture(sections ? "nonplanar-wave-floors.gcode" : "wave-floors.gcode", reinforced);
+    config.set_deserialize_strict("wave_overhang_floor_layers", "0");
+    print.apply(model, config);
+    CHECK(commands(Test::gcode(print)) == commands(original));
+    config.set_deserialize_strict("wave_overhangs", "0");
+    print.apply(model, config);
+    const auto disabled = commands(Test::gcode(print));
+    config.set_deserialize_strict("wave_overhang_floor_layers", "3");
+    print.apply(model, config);
+    CHECK(commands(Test::gcode(print)) == disabled);
+    CHECK(count_waves(print) == 0);
+}
+
 TEST_CASE("Enabled wave-overhangs generate flagged toolpaths for unsupported shelf", "[WaveOverhangs][Windows]")
 {
     Print wave;
     Test::init_and_process_print({unsupported_shelf()}, wave, settings(true));
     CHECK(count_waves(wave) > 0);
+}
+
+TEST_CASE("Per-part wave settings do not transfer to neighboring model parts", "[WaveOverhangs][Windows]")
+{
+    const bool first_enabled = GENERATE(false, true);
+    const DynamicPrintConfig config = settings(false);
+    Print print;
+    Model model;
+    Test::init_print({unsupported_shelf()}, print, model, config);
+    ModelObject *object = model.objects.front();
+    object->instances.front()->set_offset(Vec3d(60., 60., 0.));
+    object->volumes.front()->config.set("wave_overhangs", first_enabled);
+    TriangleMesh other = unsupported_shelf();
+    other.translate(40.f, 0.f, 0.f);
+    object->add_volume(other)->config.set("wave_overhangs", !first_enabled);
+    print.apply(model, config);
+    print.set_status_silent();
+    REQUIRE_NOTHROW(print.process());
+    size_t enabled_waves = 0;
+    size_t disabled_waves = 0;
+    for (const PrintObject *print_object : print.objects())
+        for (const Layer *layer : print_object->layers())
+            for (const LayerRegion *region : layer->regions()) {
+                const size_t count = wave_count(&region->perimeters);
+                if (region->region().config().wave_overhangs.value)
+                    enabled_waves += count;
+                else
+                    disabled_waves += count;
+            }
+    CHECK(enabled_waves > 0);
+    CHECK(disabled_waves == 0);
+    preserve_gcode_fixture(first_enabled ? "wave-first-part.gcode" : "wave-second-part.gcode", Test::gcode(print));
 }
 
 TEST_CASE("Elevated cut-plane sections export wave overhangs with physical motion limits", "[WaveOverhangs][Nonplanar][Windows]")

@@ -103,6 +103,7 @@ public:
     ExtrusionEntityCollection   *loops;
     ExtrusionEntityCollection   *gap_fill;
     SurfaceCollection           *fill_surfaces;
+    Polygons                    *wave_overhang_coverage = nullptr;
     //BBS
     ExPolygons                  *fill_no_overlap;
 

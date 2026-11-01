@@ -669,6 +669,53 @@ void PrintObject::prepare_infill()
     this->discover_horizontal_shells();
     m_print->throw_if_canceled();
 
+    bool reinforce_wave_floors = false;
+    for (size_t i = 0; i < this->num_printing_regions(); ++i) {
+        const PrintRegionConfig &config = this->printing_region(i).config();
+        if (config.wave_overhangs.value && config.wave_overhang_floor_layers.value > 0) {
+            reinforce_wave_floors = true;
+            break;
+        }
+    }
+    if (reinforce_wave_floors) {
+        // Reinforce only generated waves, rather than filling the whole shelf.
+        // Each source region controls the number of following rows; masks may
+        // cross material boundaries, but never leave the current section's frame.
+        std::vector<Polygons> wave_floors(m_layers.size());
+        for (size_t i = 0; i < m_layers.size(); ++i) {
+            for (const LayerRegion *region : m_layers[i]->regions()) {
+                const PrintRegionConfig &config = region->region().config();
+                if (!config.wave_overhangs.value || config.wave_overhang_floor_layers.value <= 0 ||
+                    region->wave_overhang_coverage.empty())
+                    continue;
+                const size_t last = std::min(m_layers.size() - 1, i + size_t(config.wave_overhang_floor_layers.value));
+                for (size_t j = i + 1; j <= last; ++j)
+                    polygons_append(wave_floors[j], region->wave_overhang_coverage);
+            }
+            m_print->throw_if_canceled();
+        }
+        for (size_t i = 0; i < m_layers.size(); ++i) {
+            if (wave_floors[i].empty())
+                continue;
+            const Polygons mask = union_(wave_floors[i]);
+            for (LayerRegion *region : m_layers[i]->regions()) {
+                SurfaceCollection reinforced;
+                for (const Surface &surface : region->fill_surfaces.surfaces) {
+                    if (surface.surface_type != stInternal) {
+                        reinforced.surfaces.emplace_back(surface);
+                        continue;
+                    }
+                    reinforced.append(diff_ex(ExPolygons{surface.expolygon}, mask), surface);
+                    Surface solid = surface;
+                    solid.surface_type = stInternalSolid;
+                    reinforced.append(intersection_ex(ExPolygons{surface.expolygon}, mask), solid);
+                }
+                region->fill_surfaces = std::move(reinforced);
+            }
+            m_print->throw_if_canceled();
+        }
+    }
+
 #ifdef SLIC3R_DEBUG_SLICE_PROCESSING
     for (size_t region_id = 0; region_id < this->num_printing_regions(); ++ region_id) {
         for (const Layer *layer : m_layers) {
@@ -1678,6 +1725,7 @@ bool PrintObject::invalidate_state_by_config_options(
             || opt_key == "bottom_layer_direction"
             || opt_key == "align_infill_direction_to_model" 
             || opt_key == "extra_solid_infills"
+            || opt_key == "wave_overhang_floor_layers"
             || opt_key == "ensure_vertical_shell_thickness"
             || opt_key == "bridge_angle"
             || opt_key == "internal_bridge_angle" // ORCA: Internal bridge angle override

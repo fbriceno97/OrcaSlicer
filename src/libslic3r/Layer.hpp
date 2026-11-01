@@ -71,6 +71,9 @@ public:
     ExPolygons                  fill_expolygons;
     // collection of surfaces for infill generation
     SurfaceCollection           fill_surfaces;
+    // Actual generated wave coverage, in this section's slicing frame.
+    // Retained independently of floor settings so infill-only reslicing can reuse it.
+    Polygons                    wave_overhang_coverage;
     // BBS: Unspecified fill polygons, used for interecting when we don't want the infill/perimeter overlap
     ExPolygons                  fill_no_overlap_expolygons;
 

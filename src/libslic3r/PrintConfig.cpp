@@ -1966,6 +1966,16 @@ void PrintConfigDef::init_fff_params()
     def->max = 100;
     def->set_default_value(new ConfigOptionInt(-1));
 
+    def = this->add("wave_overhang_floor_layers", coInt);
+    def->label = L("Solid layers above wave overhangs");
+    def->category = L("Quality");
+    def->sidetext = L("layers");
+    def->tooltip = L("Make this many layers of infill above generated wave traces solid. Only the area covered by the waves is reinforced. Zero follows the normal shell settings. Requires experimental wave overhangs.");
+    def->mode = comExpert;
+    def->min = 0;
+    def->max = 100;
+    def->set_default_value(new ConfigOptionInt(0));
+
     def = this->add("overhang_reverse", coBool);
     def->label = L("Reverse on even");
     def->full_label = L("Overhang reversal");
