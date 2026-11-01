@@ -38,16 +38,27 @@ not validate physical clearance or printing on Bambu A1/P2S.
 
 ## Validation status
 
-Implementation is in progress. Windows x64 compilation passed at a2a7a1d23f.
-That run passed 3,282 of 3,286 native cases, failed two (legacy configuration
-filename protection and an auto-packed raft centroid fixture), and skipped two.
-All ten re-enabled cloud mock/loopback cases passed. Commit 4a31b4ce55 addresses
-the two failures; its Windows rerun is pending. The suite excludes NotWorking
-and RequiresApp cases. Installation, live cloud login, Connect handoff and the
-interactive Windows GUI workflow remain unverified.
+Implementation is in progress. Windows x64 compilation, the native regression suite,
+preset-cache generation and application CLI smoke checks passed at
+`d0697368a5ee0aa7b4f9e2d8249d3e83c91876f9` in
+https://github.com/fbriceno97/OrcaSlicer/actions/runs/41341708733.
+Native results: 3,286 cases; 3,284 passed, zero failed, two skipped. The standard
+suite excludes NotWorking and RequiresApp. All ten re-enabled cloud mock/loopback
+cases are included. The legacy filename-protection failure is fixed, and raft
+centroid coverage now explicitly separates isolated from overlapping rafts without
+changing native support generation or G-code.
+
+Installer creation passed, but synthetic install/uninstall coexistence verification
+failed. Application artifact uploads correctly stayed blocked. Diagnostic rerun:
+https://github.com/fbriceno97/OrcaSlicer/actions/runs/41343276089.
+Live cloud login/synchronization, Connect handoff and interactive Windows segment
+selection, direction assignment, preview and export remain unverified. No Windows
+desktop session is available in this environment. Physical clearance/printing checks
+are separate and have not been performed.
 
 The real homepage DOM passes automated Chromium tests for Orca/Bambu login
 commands, account menus, plugin gating, cloud navigation and hidden-panel state.
+Local checks also passed with CSS light and dark color schemes.
 The native app bridge and account responses are mocked; this is not live sign-in
 or interactive Windows GUI verification.
 Beta 5's Bambu account adapter, login controls and privacy-policy dialog are restored;
