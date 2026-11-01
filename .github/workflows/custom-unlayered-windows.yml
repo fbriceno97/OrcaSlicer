@@ -3,6 +3,12 @@ on:
   push:
     branches: [feature/unlayered-base-custom-beta]
   workflow_dispatch:
+    inputs:
+      dependency-warmup-run:
+        description: Optional earlier run whose successful Windows dependency cache should be reused
+        required: false
+        type: string
+        default: ''
 concurrency:
   group: custom-unlayered-windows-${{ github.ref }}
   cancel-in-progress: false
@@ -10,7 +16,42 @@ permissions:
   contents: read
   actions: write
 jobs:
+  wait-for-dependencies:
+    if: ${{ inputs.dependency-warmup-run != '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Wait for the already running dependency cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WARMUP_RUN: ${{ inputs.dependency-warmup-run }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$WARMUP_RUN" =~ ^[0-9]+$ ]] || { echo "::error::Invalid warm-up run ID"; exit 1; }
+          for attempt in $(seq 1 350); do
+            jobs=$(gh api --paginate "repos/$REPOSITORY/actions/runs/$WARMUP_RUN/jobs?per_page=100" --jq '.jobs[] | select(.name == "windows-x64 / Build Deps / Build Deps") | [.status, (.conclusion // "")] | @tsv')
+            if [[ "$jobs" == $'completed\tsuccess' ]]; then
+              echo "The Windows dependency cache was saved successfully."
+              exit 0
+            fi
+            if [[ "$jobs" == completed* ]]; then
+              echo "::error::The warm-up dependency build failed: $jobs"
+              exit 1
+            fi
+            state=$(gh api "repos/$REPOSITORY/actions/runs/$WARMUP_RUN" --jq '.status')
+            if [[ "$state" == completed ]]; then
+              echo "::error::Warm-up ended without a successful dependency job."
+              exit 1
+            fi
+            sleep 10
+          done
+          echo "::error::Timed out waiting for the dependency cache."
+          exit 1
   windows-x64:
+    needs: wait-for-dependencies
+    if: ${{ !cancelled() && (needs.wait-for-dependencies.result == 'success' || needs.wait-for-dependencies.result == 'skipped') }}
     uses: ./.github/workflows/build_check_cache.yml
     with:
       os: windows-latest
