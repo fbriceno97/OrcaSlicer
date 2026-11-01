@@ -3,6 +3,10 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <cstddef>
+#include <fstream>
+#include <ios>
+#include <boost/filesystem/path.hpp>
 #include <initializer_list>
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/BoundingBox.hpp"
@@ -1630,19 +1634,19 @@ static std::string slice_two_object_bbl(DynamicPrintConfig &config)
     return Slic3r::Test::gcode(print);
 }
 
-// The real change_filament_gcode of a shipped "<printer> 0.4 nozzle" machine profile.
+// A real G-code field of a shipped "<printer> 0.4 nozzle" machine profile.
 // The profile does not state it inline any more: it names the template carrying it in
 // `include`, and the loader layers that template under the preset. Follow the same list
 // - so a profile that stops naming one fails here instead of silently slicing G-code it
 // no longer ships.
-static std::string shipped_change_filament_gcode(const std::string &printer)
+static std::string shipped_machine_gcode(const std::string &printer, const std::string &key = "change_filament_gcode")
 {
     const std::string machine_dir   = std::string(PROFILES_DIR) + "/BBL/machine/";
     const std::string machine_path  = machine_dir + "Bambu Lab " + printer + " 0.4 nozzle.json";
-    const std::string template_name = "Bambu Lab " + printer + " 0.4 nozzle template change_filament_gcode";
+    const std::string template_name = "Bambu Lab " + printer + " 0.4 nozzle template " + key;
     // PROFILES_DIR is an absolute path baked in at build time; a sparse test checkout
     // without resources/ leaves it missing. Skip rather than dereference a config that
-    // never loaded - this is the only fff_print test that reads a shipped profile.
+    // never loaded. Section-export cases require the source profile explicitly.
     if (!boost::filesystem::exists(machine_path))
         SKIP("shipped profile not present in this checkout: " << machine_path);
 
@@ -1666,8 +1670,67 @@ static std::string shipped_change_filament_gcode(const std::string &printer)
 
     std::map<std::string, std::string> template_values;
     const DynamicPrintConfig           config = load(machine_dir + template_name + ".json", template_values);
-    REQUIRE(config.has("change_filament_gcode"));
-    return config.opt_string("change_filament_gcode");
+    REQUIRE(config.has(key));
+    return config.opt_string(key);
+}
+
+TEST_CASE("Bundled A1 and P2S layer templates export through tilted section frames", "[GCodeWriter][Nonplanar][Bambu]")
+{
+    const std::string printer = GENERATE(std::string("A1"), std::string("P2S"));
+    REQUIRE(boost::filesystem::exists(std::string(PROFILES_DIR) + "/BBL/machine/Bambu Lab " + printer + " 0.4 nozzle.json"));
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({{"enable_nonplanar", "1"}, {"print_sequence", "by object"},
+        {"enable_prime_tower", "0"}, {"enable_support", "0"}, {"layer_height", "0.2"},
+        {"initial_layer_print_height", "0.2"}, {"skirt_loops", "0"}, {"brim_type", "no_brim"},
+        {"sparse_infill_density", "15%"}, {"wall_loops", "2"}, {"top_shell_layers", "2"},
+        {"bottom_shell_layers", "2"}, {"use_relative_e_distances", "1"}, {"travel_speed_z", "4"},
+        {"close_additional_fan_first_x_layers", "2"}, {"additional_fan_full_speed_layer", "4"},
+        {"additional_cooling_fan_speed", "30"}, {"first_x_layer_fan_speed", "10"},
+        {"machine_start_gcode", "G90\nM83\nG1 X0 Y0 Z2 F240\n"}, {"machine_end_gcode", "M400\n"},
+        {"before_layer_change_gcode", ""}, {"time_lapse_gcode", ""}});
+    config.set_deserialize_strict("layer_change_gcode", shipped_machine_gcode(printer, "layer_change_gcode"));
+    Print print;
+    print.is_BBL_printer() = true;
+    Model model;
+    Slic3r::Test::init_print({cube(8.)}, print, model, config);
+    ModelObject *object = model.objects.front();
+    object->instances.front()->set_offset(Vec3d(60., 60., 0.));
+    object->cut_planes.enabled = true;
+    CutPlane plane;
+    plane.point = Vec3d(4., 4., 4.);
+    plane.normal = Vec3d(std::sin(Geometry::deg2rad(10.)), 0., std::cos(Geometry::deg2rad(10.)));
+    object->cut_planes.planes.push_back(plane);
+    print.apply(model, config);
+    const auto validation = print.validate();
+    INFO(validation.string);
+    REQUIRE(validation.string.empty());
+    GCodeProcessorResult result;
+    const std::string program = Slic3r::Test::gcode(print, &result);
+    REQUIRE(program.find("!!!!!") == std::string::npos);
+    REQUIRE(result.nonplanar_metadata_valid);
+    GCodeReader reader;
+    reader.apply_config(config);
+    int section = -1;
+    std::map<int, size_t> notifications;
+    reader.parse_buffer(program, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
+        if (line.raw().rfind("; SEGMENT_ID:", 0) == 0)
+            section = std::stoi(line.raw().substr(13));
+        if (line.cmd_is("M991")) {
+            CHECK(section >= 0);
+            ++notifications[section];
+        }
+    });
+    CHECK(notifications[0] > 0);
+    CHECK(notifications[1] > 0);
+    CHECK_NOTHROW(print.validate_nonplanar_gcode(result));
+    if (const char *directory = std::getenv("ORCA_TEST_GCODE_ARTIFACT_DIR"); directory && *directory) {
+        boost::filesystem::create_directories(directory);
+        std::ofstream fixture((boost::filesystem::path(directory) / ("nonplanar-" + printer + "-layer-template.gcode")).string(), std::ios::binary);
+        REQUIRE(fixture.is_open());
+        fixture << "; Software layer-template fixture only; NOT printer-ready. Startup/calibration are synthetic.\n" << program;
+        fixture.flush();
+        REQUIRE(fixture.good());
+    }
 }
 
 SCENARIO("Toolchange gcode resolves old/new_extruder_variant from printer_extruder_variant", "[GCodeWriter][H2C]")
@@ -1730,7 +1793,7 @@ SCENARIO("Shipped dual-nozzle change_filament_gcode resolves during a real slice
 
     GIVEN("the real " + printer + " change_filament_gcode driving a BBL dual-extruder slice") {
         DynamicPrintConfig config = dual_extruder_toolchange_config();
-        config.set_key_value("change_filament_gcode", new ConfigOptionString(shipped_change_filament_gcode(printer)));
+        config.set_key_value("change_filament_gcode", new ConfigOptionString(shipped_machine_gcode(printer)));
         // H2D's gcode branches on the extruder variant; give the extruders distinct kits so the
         // "Direct Drive TPU High Flow" branch is reachable.
         config.set_key_value("printer_extruder_variant",
