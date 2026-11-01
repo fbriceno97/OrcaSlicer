@@ -71,7 +71,7 @@ namespace GUI {
 // (x-frame-options: DENY / CSP frame-ancestors 'none').
 // Unlayered: no Orca Cloud. The home page has no button for this pane and the URL is blank, so
 // load_cloud_url() loads nothing even if the pane is asked to open.
-static const char *const kCloudUrl = "";
+static const char *const kCloudUrl = "https://cloud.orcaslicer.com";
 // #LeftBoard in resources/web/homepage/css/home.css is a 262px column plus a 1px right
 // border; the homepage keeps that width as the nav column while the cloud pane is open.
 static const int kLeftNavWidth = 220 + 1; // 1px border
