@@ -38,8 +38,18 @@ not validate physical clearance or printing on Bambu A1/P2S.
 
 ## Validation status
 
-Implementation is in progress. No Windows build, native test suite, installation,
-cloud login, Connect handoff or interactive GUI workflow has been verified yet.
+Implementation is in progress. Windows x64 compilation passed at a2a7a1d23f.
+That run passed 3,282 of 3,286 native cases, failed two (legacy configuration
+filename protection and an auto-packed raft centroid fixture), and skipped two.
+All ten re-enabled cloud mock/loopback cases passed. Commit 4a31b4ce55 addresses
+the two failures; its Windows rerun is pending. The suite excludes NotWorking
+and RequiresApp cases. Installation, live cloud login, Connect handoff and the
+interactive Windows GUI workflow remain unverified.
+
+The real homepage DOM passes automated Chromium tests for Orca/Bambu login
+commands, account menus, plugin gating, cloud navigation and hidden-panel state.
+The native app bridge and account responses are mocked; this is not live sign-in
+or interactive Windows GUI verification.
 Beta 5's Bambu account adapter, login controls and privacy-policy dialog are restored;
 Orca Cloud transport is re-enabled with its Beta 5 endpoints and public client key.
 The credential-store service is UnlayeredCustomBeta/Auth, so existing applications'
