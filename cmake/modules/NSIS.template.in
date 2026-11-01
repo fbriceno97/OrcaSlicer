@@ -999,6 +999,11 @@ Section "Uninstall"
 
 @CPACK_NSIS_EXTRA_UNINSTALL_COMMANDS@
 
+  ; The core install creates this exact shortcut independently of the optional
+  ; desktop checkbox. CPack's generated deletion is checkbox-dependent, so a
+  ; silent install otherwise leaves our explicitly created shortcut behind.
+  Delete "$DESKTOP\Unlayered Custom Beta.lnk"
+
   ;Remove files we installed.
   ;Keep the list of directories here in sync with the File commands above.
 @CPACK_NSIS_DELETE_FILES@
