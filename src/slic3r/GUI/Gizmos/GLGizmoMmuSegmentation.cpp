@@ -125,6 +125,10 @@ bool GLGizmoMmuSegmentation::on_init()
 {
     // BBS
     m_shortcut = Shortcut::GizmoMmuSegmentation;
+    // Bambu Studio 2.8.4.57 remembers a 30-degree geometry edge threshold.
+    // Only this color painting gizmo is affected; other painter gizmos retain their defaults.
+    m_smart_fill_angle = 30.f;
+    m_last_edge_detection_smart_fill_angle = 30.f;
 
     const wxString ctrl  = GUI::shortkey_ctrl_prefix();
     const wxString alt   = GUI::shortkey_alt_prefix();
@@ -136,6 +140,9 @@ bool GLGizmoMmuSegmentation::on_init()
     m_desc["erase"]            = _L("Erase");
     m_desc["shortcut_key"]     = _L("Choose filament");
     m_desc["edge_detection"]   = _L("Edge detection");
+    m_desc["same_color_connection"] = _L("Connected same color");
+    m_desc["clipping_of_view"] = _L("Section view");
+    m_desc["reset_direction"]  = _L("Reset section");
     m_desc["gap_area"]         = _L("Gap area");
     m_desc["perform"]          = _L("Apply");
     m_desc["remove_all"]       = _L("Erase all");
@@ -240,6 +247,7 @@ bool GLGizmoMmuSegmentation::on_number_key_down(int number)
 
 bool GLGizmoMmuSegmentation::on_tool_shortcut(Shortcut shortcut)
 {
+    const wchar_t old_tool = m_current_tool;
     switch (shortcut) {
     case Shortcut::PaintToolFill:        m_current_tool = ImGui::FillButtonIcon; break;
     case Shortcut::PaintToolTriangle:    m_current_tool = ImGui::TriangleButtonIcon; break;
@@ -248,6 +256,14 @@ bool GLGizmoMmuSegmentation::on_tool_shortcut(Shortcut shortcut)
     case Shortcut::PaintToolHeightRange: m_current_tool = ImGui::HeightRangeIcon; break;
     case Shortcut::PaintToolGapFill:     m_current_tool = ImGui::GapFillIcon; break;
     default: return false;
+    }
+    if (old_tool != m_current_tool) {
+        tool_changed(old_tool, m_current_tool);
+        for (auto &selector : m_triangle_selectors) {
+            selector->seed_fill_unselect_all_triangles();
+            selector->request_update_render_data();
+        }
+        m_parent.set_as_dirty();
     }
     return true;
 }
@@ -598,6 +614,26 @@ void GLGizmoMmuSegmentation::on_render_input_window(float x, float y, float bott
         m_cursor_type = TriangleSelector::CursorType::POINTER;
         m_tool_type = ToolType::BUCKET_FILL;
 
+        // Match the two mutually exclusive fill modes from Bambu Studio 2.8.4.57.
+        // Both modes use the existing Orca TriangleSelector patch implementation,
+        // where a negative threshold means connected same-color selection.
+        const bool was_edge_mode = m_detect_geometry_edge;
+        if (ImGui::RadioButton(m_desc["edge_detection"].ToUTF8().data(), was_edge_mode)) {
+            m_detect_geometry_edge = true;
+            m_smart_fill_angle = m_last_edge_detection_smart_fill_angle;
+        }
+        ImGui::SameLine();
+        if (ImGui::RadioButton(m_desc["same_color_connection"].ToUTF8().data(), !was_edge_mode)) {
+            m_detect_geometry_edge = false;
+            m_smart_fill_angle = -1.f;
+        }
+        if (was_edge_mode != m_detect_geometry_edge) {
+            for (auto &triangle_selector : m_triangle_selectors) {
+                triangle_selector->seed_fill_unselect_all_triangles();
+                triangle_selector->request_update_render_data();
+            }
+        }
+
         if (m_detect_geometry_edge) {
             ImGui::AlignTextToFramePadding();
             m_imgui->text(m_desc["smart_fill_angle"]);
@@ -605,21 +641,23 @@ void GLGizmoMmuSegmentation::on_render_input_window(float x, float y, float bott
                                                                                     "placed after the number with no whitespace in between.");
             ImGui::SameLine(sliders_left_width);
             ImGui::PushItemWidth(sliders_width);
-            if (m_imgui->bbl_slider_float_style("##smart_fill_angle", &m_smart_fill_angle, SmartFillAngleMin, SmartFillAngleMax, format_str.data(), 1.0f, true))
+            bool angle_changed = m_imgui->bbl_slider_float_style("##smart_fill_angle", &m_smart_fill_angle,
+                SmartFillAngleMin, SmartFillAngleMax, format_str.data(), 1.0f, true);
+            ImGui::SameLine(drag_left_width + sliders_left_width);
+            ImGui::PushItemWidth(1.5 * slider_icon_width);
+            angle_changed |= ImGui::BBLDragFloat("##smart_fill_angle_input", &m_smart_fill_angle, 0.05f, 0.0f, 0.0f, "%.2f");
+            m_smart_fill_angle = std::clamp(m_smart_fill_angle, SmartFillAngleMin, SmartFillAngleMax);
+            m_last_edge_detection_smart_fill_angle = m_smart_fill_angle;
+            if (angle_changed) {
                 for (auto &triangle_selector : m_triangle_selectors) {
                     triangle_selector->seed_fill_unselect_all_triangles();
                     triangle_selector->request_update_render_data();
                 }
-            ImGui::SameLine(drag_left_width + sliders_left_width);
-            ImGui::PushItemWidth(1.5 * slider_icon_width);
-            ImGui::BBLDragFloat("##smart_fill_angle_input", &m_smart_fill_angle, 0.05f, 0.0f, 0.0f, "%.2f");
+            }
         } else {
-            // set to negative value to disable edge detection
             m_smart_fill_angle = -1.f;
         }
-                
-        m_imgui->bbl_checkbox(m_desc["edge_detection"], m_detect_geometry_edge);
-    } 
+    }
     else if (m_current_tool == ImGui::HeightRangeIcon) {
         m_tool_type   = ToolType::BRUSH;
         m_cursor_type = TriangleSelector::CursorType::HEIGHT_RANGE;
@@ -657,6 +695,30 @@ void GLGizmoMmuSegmentation::on_render_input_window(float x, float y, float bott
             }
             update_model_object();
             m_parent.set_as_dirty();
+        }
+    }
+
+    // Bambu Studio painting Section View: clip the model at any depth without
+    // leaving Color Painting. Applies consistently to brush, triangle, fill,
+    // height-range and gap-fill tools.
+    ImGui::Separator();
+    m_imgui->text(m_desc.at("clipping_of_view"));
+    float section_depth = static_cast<float>(m_c->object_clipper()->get_position());
+    ImGui::SameLine(sliders_left_width);
+    ImGui::PushItemWidth(sliders_width);
+    bool section_changed = m_imgui->bbl_slider_float_style("##paint_section_depth", &section_depth,
+        0.f, 1.f, "%.2f", 1.0f, true);
+    ImGui::SameLine(drag_left_width + sliders_left_width);
+    ImGui::PushItemWidth(1.5f * slider_icon_width);
+    section_changed |= ImGui::BBLDragFloat("##paint_section_depth_input", &section_depth,
+        0.05f, 0.f, 1.f, "%.2f");
+    if (section_changed)
+        set_paint_section_ratio(section_depth);
+    if (section_depth > 0.f) {
+        if (m_imgui->button(m_desc.at("reset_direction"))) {
+            wxGetApp().CallAfter([this]() {
+                set_paint_section_ratio(0., false);
+            });
         }
     }
 

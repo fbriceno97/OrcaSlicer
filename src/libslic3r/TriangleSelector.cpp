@@ -313,7 +313,7 @@ void TriangleSelector::select_patch(int facet_start, std::unique_ptr<Cursor> &&c
         // BBS: improve details for large cursor radius
         TriangleSelector::HeightRange* hr_cursor = dynamic_cast<TriangleSelector::HeightRange*>(m_cursor.get());
         if (hr_cursor == nullptr) {
-            set_edge_limit(std::min(std::sqrt(m_cursor->radius_sqr) / 5.f, 0.05f));
+            set_edge_limit(std::min(std::sqrt(m_cursor->radius_sqr) / 5.f, m_brush_edge_limit));
             m_old_cursor_radius_sqr = m_cursor->radius_sqr;
         }
         else {
@@ -1163,6 +1163,22 @@ bool TriangleSelector::Circle::is_edge_inside_cursor(const Triangle &tr, const s
     return false;
 }
 
+// Adapted from Bambu Studio v02.08.04.57 (AGPL-3.0): height bands and
+// subdivision tolerances are measured in world coordinates, even for uniform
+// scaling. Treating them as a mesh-space spherical cursor loses narrow bands.
+TriangleSelector::HeightRange::HeightRange(float z_world_, const Vec3f& source_, float height_,
+                                           const Transform3d& trafo_, const ClippingPlane& clipping_plane_)
+    : SinglePointCursor(Vec3f::Zero(), source_, 1.f, trafo_, clipping_plane_), m_z_world(z_world_), m_height(height_)
+{
+    uniform_scaling = false;
+    // Cursor already transforms source for non-uniform scaling; assign from
+    // source_ to avoid applying the transformation twice in that case.
+    source = trafo * source_;
+    radius = height_;
+    radius_sqr = Slic3r::sqr(height_);
+    trafo_normal = trafo.linear().inverse().transpose();
+}
+
 // BBS
 bool TriangleSelector::HeightRange::is_pointer_in_triangle(const Vec3f& p1_, const Vec3f& p2_, const Vec3f& p3_) const
 {
@@ -1341,8 +1357,8 @@ void TriangleSelector::remap_triangle_state(const EnforcerBlockerStateMap& state
     });
 }
 
-TriangleSelector::TriangleSelector(const TriangleMesh& mesh, float edge_limit)
-    : m_mesh{mesh}, m_neighbors(its_face_neighbors(mesh.its)), m_face_normals(its_face_normals(mesh.its)), m_edge_limit(edge_limit)
+TriangleSelector::TriangleSelector(const TriangleMesh& mesh, float edge_limit, float brush_edge_limit)
+    : m_mesh{mesh}, m_neighbors(its_face_neighbors(mesh.its)), m_face_normals(its_face_normals(mesh.its)), m_edge_limit(edge_limit), m_brush_edge_limit(brush_edge_limit)
 {
     reset();
 }

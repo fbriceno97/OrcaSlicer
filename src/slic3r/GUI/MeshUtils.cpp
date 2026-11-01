@@ -446,7 +446,7 @@ void MeshRaycaster::line_from_mouse_pos(const Vec2d& mouse_pos, const Transform3
 
 bool MeshRaycaster::unproject_on_mesh(const Vec2d& mouse_pos, const Transform3d& trafo, const Camera& camera,
                                       Vec3f& position, Vec3f& normal, const ClippingPlane* clipping_plane,
-                                      size_t* facet_idx, bool sinking_limit) const
+                                      size_t* facet_idx, bool sinking_limit, bool preserve_coincident_hits) const
 {
     Vec3d point;
     Vec3d direction;
@@ -455,7 +455,7 @@ bool MeshRaycaster::unproject_on_mesh(const Vec2d& mouse_pos, const Transform3d&
     point     = inv*point;
     direction = inv.linear()*direction;
 
-    std::vector<AABBMesh::hit_result> hits = m_emesh.query_ray_hits(point, direction);
+    std::vector<AABBMesh::hit_result> hits = m_emesh.query_ray_hits(point, direction, preserve_coincident_hits);
 
     if (hits.empty())
         return false; // no intersection found

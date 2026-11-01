@@ -725,6 +725,20 @@ std::vector<GLGizmoPainterBase::ProjectedHeightRange> GLGizmoPainterBase::get_pr
     return hit_triangles_by_mesh;
 }
 
+void GLGizmoPainterBase::set_paint_section_ratio(double ratio, bool keep_normal)
+{
+    if (!keep_normal || m_paint_section_normal.squaredNorm() == 0.)
+        m_paint_section_normal = -wxGetApp().plater()->get_camera().get_dir_forward();
+    m_c->object_clipper()->set_position_by_ratio(std::clamp(ratio, 0., 1.), m_paint_section_normal);
+    // Clipping changes the hit even if the mouse has not moved.
+    m_rr.mouse_position = Vec2d(-1., -1.);
+    for (auto &selector : m_triangle_selectors) {
+        selector->seed_fill_unselect_all_triangles();
+        selector->request_update_render_data();
+    }
+    m_parent.set_as_dirty();
+}
+
 // Following function is called from GLCanvas3D to inform the gizmo about a mouse/keyboard event.
 // The gizmo has an opportunity to react - if it does, it should return true so that the Canvas3D is
 // aware that the event was reacted to and stops trying to make different sense of it. If the gizmo
@@ -751,21 +765,25 @@ bool GLGizmoPainterBase::gizmo_event(SLAGizmoEventType action, const Vec2d& mous
             }
 
             if (m_tool_type == ToolType::BUCKET_FILL || m_tool_type == ToolType::SMART_FILL) {
+                // A negative bucket threshold means connected same color. Scrolling must
+                // not silently enable geometry filtering in that mode.
+                if (m_tool_type == ToolType::BUCKET_FILL && m_smart_fill_angle < 0.f)
+                    return true;
                 m_smart_fill_angle = action == SLAGizmoEventType::MouseWheelDown ? std::max(m_smart_fill_angle - SmartFillAngleStep, SmartFillAngleMin)
                                                                                 : std::min(m_smart_fill_angle + SmartFillAngleStep, SmartFillAngleMax);
                 m_parent.set_as_dirty();
                 if (m_rr.mesh_id != -1) {
-                    const Selection     &selection                 = m_parent.get_selection();
-                    const ModelObject   *mo                        = m_c->selection_info()->model_object();
-                    const ModelInstance *mi                        = mo->instances[selection.get_instance_idx()];
-                    const Transform3d   trafo_matrix_not_translate = m_parent.get_canvas_type() == GLCanvas3D::CanvasAssembleView ?
-                        mi->get_assemble_transformation().get_matrix_no_offset() * mo->volumes[m_rr.mesh_id]->get_matrix_no_offset() :
-                        mi->get_transformation().get_matrix_no_offset() * mo->volumes[m_rr.mesh_id]->get_matrix_no_offset();
-                    const Transform3d   trafo_matrix = m_parent.get_canvas_type() == GLCanvas3D::CanvasAssembleView ?
-                        mi->get_assemble_transformation().get_matrix() * mo->volumes[m_rr.mesh_id]->get_matrix() :
-                        mi->get_transformation().get_matrix() * mo->volumes[m_rr.mesh_id]->get_matrix();
-                    m_triangle_selectors[m_rr.mesh_id]->seed_fill_select_triangles(m_rr.hit, int(m_rr.facet), trafo_matrix_not_translate, this->get_clipping_plane_in_volume_coordinates(trafo_matrix), m_smart_fill_angle,
-                                                                                   m_paint_on_overhangs_only ? get_highlight_angle_limit_deg() : 0.f, get_tilt_up_direction(), true);
+                    const auto transforms = mesh_trafo_matrices();
+                    const Transform3d &trafo_matrix = transforms[m_rr.mesh_id];
+                    const auto clp = get_clipping_plane_in_volume_coordinates(trafo_matrix);
+                    if (m_tool_type == ToolType::BUCKET_FILL)
+                        m_triangle_selectors[m_rr.mesh_id]->bucket_fill_select_triangles(
+                            m_rr.hit, int(m_rr.facet), clp, m_smart_fill_angle, true, true);
+                    else
+                        m_triangle_selectors[m_rr.mesh_id]->seed_fill_select_triangles(
+                            m_rr.hit, int(m_rr.facet), trafo_matrix, clp, m_smart_fill_angle,
+                            m_paint_on_overhangs_only ? get_highlight_angle_limit_deg() : 0.f, get_tilt_up_direction(), true);
+
                     m_triangle_selectors[m_rr.mesh_id]->request_update_render_data();
                     m_seed_fill_last_mesh_id = m_rr.mesh_id;
                 }
@@ -779,6 +797,10 @@ bool GLGizmoPainterBase::gizmo_event(SLAGizmoEventType action, const Vec2d& mous
                 m_parent.set_as_dirty();
                 return true;
             }
+        } else if (alt_down && get_painter_type() == PainterGizmoType::MM_SEGMENTATION) {
+            const double step = action == SLAGizmoEventType::MouseWheelDown ? -0.01 : 0.01;
+            set_paint_section_ratio(m_c->object_clipper()->get_position() + step);
+            return true;
         }
     }
 
@@ -1140,7 +1162,8 @@ void GLGizmoPainterBase::update_raycast_cache(const Vec2d& mouse_position,
                    normal,
                    m_c->object_clipper()->get_clipping_plane(),
                    &facet,
-                   m_parent.get_canvas_type() != GLCanvas3D::CanvasAssembleView))
+                   m_parent.get_canvas_type() != GLCanvas3D::CanvasAssembleView,
+                   get_painter_type() == PainterGizmoType::MM_SEGMENTATION))
         {
             // In case this hit is clipped, skip it.
             if (is_mesh_point_clipped(hit.cast<double>(), trafo_matrices[mesh_id]))

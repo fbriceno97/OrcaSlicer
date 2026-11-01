@@ -219,8 +219,7 @@ public:
     public:
         HeightRange() = delete;
         // BBS: set cursor_radius to 0.1 for high smooth edge
-        explicit HeightRange(float z_world_, const Vec3f& source_, float height_, const Transform3d& trafo_, const ClippingPlane& clipping_plane_)
-            : SinglePointCursor(Vec3f(0.f, 0.f, 0.f), source_, 1.f, trafo_, clipping_plane_), m_z_world(z_world_), m_height(height_) {}
+        explicit HeightRange(float z_world_, const Vec3f& source_, float height_, const Transform3d& trafo_, const ClippingPlane& clipping_plane_);
         ~HeightRange() override = default;
 
         bool is_pointer_in_triangle(const Vec3f& p1, const Vec3f& p2, const Vec3f& p3) const override;
@@ -337,7 +336,7 @@ public:
 
     // Create new object on a TriangleMesh. The referenced mesh must
     // stay valid, a ptr to it is saved and used.
-    explicit TriangleSelector(const TriangleMesh& mesh, float edge_limit = 0.6f);
+    explicit TriangleSelector(const TriangleMesh& mesh, float edge_limit = 0.6f, float brush_edge_limit = 0.05f);
 
     // Returns the facet_idx of the unsplit triangle containing the "hit". Returns -1 if the triangle isn't found.
     [[nodiscard]] int select_unsplit_triangle(const Vec3f &hit, int facet_idx) const;
@@ -533,6 +532,9 @@ protected:
 
     // BBS
     float m_edge_limit = 0.6f;
+    // Color painting follows Bambu Studio's 0.2 mm subdivision cap. Other
+    // painters retain Orca's finer cap through the constructor default.
+    const float m_brush_edge_limit;
 
     // Number of invalid triangles (to trigger garbage collection).
     int m_invalid_triangles;
