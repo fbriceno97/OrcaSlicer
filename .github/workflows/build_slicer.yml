@@ -478,10 +478,10 @@ jobs:
 
       - name: Run Windows software regression checks before packaging
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          ctest --test-dir "$env:BUILD_DIR/tests" -C Release --output-on-failure --parallel 2
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        shell: bash
+        env:
+          CTEST_PARALLEL_LEVEL: 2
+        run: scripts/run_unit_tests.sh "$BUILD_DIR/tests" Release
 
       - name: Build system preset cache (Windows)
         if: runner.os == 'Windows'

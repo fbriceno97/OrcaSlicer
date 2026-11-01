@@ -747,7 +747,10 @@ public:
     void            start_http_server(int port, const std::string& provider = ORCA_CLOUD_PROVIDER);
     void            stop_http_server();
 
-    // Unlayered: Bambu-cloud privacy-policy dialog removed with the account surface.
+    void            on_show_check_privacy_dlg(int online_login = 0, const std::string& provider = ORCA_CLOUD_PROVIDER);
+    void            show_check_privacy_dlg(wxCommandEvent& evt);
+    void            on_check_privacy_update(wxCommandEvent &evt);
+    bool            check_privacy_update();
     void            check_privacy_version(int online_login = 0, const std::string& provider = ORCA_CLOUD_PROVIDER);
     void            check_track_enable();
 

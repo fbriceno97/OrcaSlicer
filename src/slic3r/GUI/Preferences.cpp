@@ -2823,12 +2823,7 @@ void PreferencesDialog::create_items()
     //// ONLINE > Connection
     g_sizer->Add(create_item_title(_L("Connection")), 1, wxEXPAND);
 
-    // Unlayered: the cloud-account settings (login region, the home page's login panel) are never
-    // shown. This build has no Orca Cloud and no Bambu cloud account, so they could only advertise
-    // a service it does not talk to. Until 0.1.6 they were hidden only while stealth mode was on,
-    // which stopped covering everyone once the first-run page asked about stealth mode with the
-    // box unticked. The saved login region is kept as it is.
-    const bool show_cloud_ui = false;
+    const bool show_cloud_ui = !app_config->get_stealth_mode();
 
     if (show_cloud_ui) {
         auto item_region = create_item_region_combobox(_L("Login region"), "");
@@ -2887,8 +2882,9 @@ void PreferencesDialog::create_items()
         update_privacy_controls();
     }
 
-    // Unlayered: the "Enable Bambu Cloud" option was removed with the Bambu account surface.
-    // Bambu printers are used over LAN only; there is no Bambu cloud to opt into.
+    auto item_bambu_cloud = create_item_bambu_cloud(_L("Enable Bambu Cloud"),
+        _L("Allow logging into Bambu Cloud alongside Orca Cloud. When enabled, a Bambu login section appears on the homepage."));
+    g_sizer->Add(item_bambu_cloud);
 
     //// ONLINE > Update & sync
     g_sizer->Add(create_item_title(_L("Update & sync")), 1, wxEXPAND);

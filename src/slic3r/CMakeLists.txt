@@ -527,6 +527,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/PlateSettingsDialog.cpp
     GUI/PlateSettingsDialog.hpp
     GUI/PrebuildQueue.hpp
+    GUI/PrivacyUpdateDialog.cpp
+    GUI/PrivacyUpdateDialog.hpp
     GUI/Preferences.cpp
     GUI/Preferences.hpp
     GUI/PresetBundleDialog.cpp
@@ -924,6 +926,8 @@ set(SLIC3R_GUI_SOURCES
     Utils/ICloudServiceAgent.hpp
     Utils/IPrinterAgent.hpp
     Utils/ICameraSignalingChannel.hpp
+    Utils/BBLCloudServiceAgent.cpp
+    Utils/BBLCloudServiceAgent.hpp
     Utils/OrcaCloudServiceAgent.cpp
     Utils/OrcaCloudServiceAgent.hpp
     Utils/OrcaPrinterAgent.cpp

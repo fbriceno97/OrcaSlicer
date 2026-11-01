@@ -40,5 +40,12 @@ not validate physical clearance or printing on Bambu A1/P2S.
 
 Implementation is in progress. No Windows build, native test suite, installation,
 cloud login, Connect handoff or interactive GUI workflow has been verified yet.
-The cloud/account restoration still requires a targeted port because Unlayered
-deliberately removed that account UI. Source inspection is not GUI verification.
+Beta 5's Bambu account adapter, login controls and privacy-policy dialog are restored;
+Orca Cloud transport is re-enabled with its Beta 5 endpoints and public client key.
+The credential-store service is UnlayeredCustomBeta/Auth, so existing applications'
+stored credentials are not read or changed. Cloud authentication and synchronization
+still require runtime verification. Source inspection is not GUI verification.
+
+Local isolated bucket traversal matches pinned Beta 5 in all 216 synthetic cases.
+This check does not exercise native mesh adjacency/subdivision, painting controls,
+undo, project round-tripping, preview, cloud access or physical printing.

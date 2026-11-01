@@ -462,6 +462,20 @@ TEST_CASE("Planned presets import through PresetBundle as user presets", "[Other
 {
     TempTree t;
     make_orca(t.path / "orca");
+    // Beta 5 uses the OrcaSlicer data directory: import must leave every source byte in place.
+    auto source_snapshot = [&]() {
+        std::map<std::string, std::string> snapshot;
+        const fs::path source_root = t.path / "orca";
+        for (fs::recursive_directory_iterator it(source_root), end; it != end; ++it) {
+            if (!fs::is_regular_file(it->path()))
+                continue;
+            boost::nowide::ifstream file(it->path().string(), std::ios::binary);
+            snapshot.emplace(fs::relative(it->path(), source_root).generic_string(),
+                             std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()));
+        }
+        return snapshot;
+    };
+    const auto original_source = source_snapshot();
     const std::string previous_data_dir = data_dir();
     struct RestoreDataDir
     {
@@ -512,6 +526,7 @@ TEST_CASE("Planned presets import through PresetBundle as user presets", "[Other
     boost::nowide::ifstream in(printer->file);
     const std::string       saved((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
     CHECK(saved.find("SECRET-KEY") == std::string::npos);
+    CHECK(source_snapshot() == original_source);
 }
 
 // ------------------------------------------------------------------------------------------------

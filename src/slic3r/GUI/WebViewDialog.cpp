@@ -900,13 +900,12 @@ void WebViewPanel::SendCloudProvidersInfo()
     json data;
     json provider_array = json::array();
 
-    // NO providers, ever, which is what hides the account UI on the home page: home.js hides
-    // #LeftBoard when "orca" is absent and #BambuCloudSection when "bbl" is (see the
-    // cloud_providers_info handler). This build has no Orca Cloud and no Bambu cloud account
-    // (OrcaCloudServiceAgent's hosts are blank; Bambu printers are used over LAN only), so the
-    // panel could only advertise a sign-in that cannot work. Until 0.1.6 it was hidden only while
-    // stealth mode was on, which stopped covering everyone once the first-run page asked about
-    // stealth mode with the box unticked. GUI_App refuses the login commands as well.
+    if (!app_config->get_hide_login_side_panel()) {
+        auto providers = app_config->get_cloud_providers();
+        for (const auto& p : providers) {
+            provider_array.push_back(p);
+        }
+    }
 
     data["providers"] = provider_array;
     j["data"] = data;
