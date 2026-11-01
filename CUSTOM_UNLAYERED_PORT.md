@@ -16,6 +16,21 @@ preview, collision checks and G-code export remain the base implementation.
 Z anti-aliasing is already present in this base and must be regression-tested
 together with native nonplanar output.
 
+## Feature provenance
+
+The Beta 5 custom commit range was compared against its pre-custom ancestor
+`1ee0b730a1`. The pinned Beta 5 tree, not a moving branch, supplied the port.
+
+| Feature | Source and treatment |
+| --- | --- |
+| Painting controls, world-space height bands, subdivision, overlapping-shell picking | Beta 5 commits `57f92c3676`, `350078a0c9`, `051d30f468`, `0723e597e6`, `11fec226a9`; ported with native Unlayered tilt/highlight behavior retained. |
+| Bambu Connect slice-to-import and cancellation | Beta 5 commits `be2df00a45` through `3788f7c8c8`; adapted to native Unlayered print-button dispatch. |
+| Orca/Bambu accounts and cloud pane | Restored from the pinned Beta 5 adapter, account markup, provider commands and endpoint configuration; retained newer base session helpers and native device-tab behavior. |
+| Branding, installer identity, executable metadata and associations | Beta 5 identity fixes including `605c252ec5`, `d49b135f8a`, `e5a6dd33de`, `634f6c9a90`; adapted to a third, separate identity. |
+| Z anti-aliasing | Already implemented by the approved Unlayered base; retained, including its native fill regression. |
+| Segments, build directions, nonplanar slicing, preview, G-code and collision checks | Approved Unlayered v0.1.9 implementation retained. Core implementation files compare byte-for-byte with that source base. |
+| Settings import | Native additive Other Slicer Import retained; the real importer regression additionally verifies source-file byte preservation. |
+
 The application is identified as Unlayered Custom Beta. Its settings key is
 UnlayeredCustomBeta, distinct from Beta 5's OrcaSlicer key and stock Unlayered.
 Its installer registry key, install directory, shortcuts, file ProgID, URL protocol
@@ -38,19 +53,43 @@ not validate physical clearance or printing on Bambu A1/P2S.
 
 ## Validation status
 
-Implementation is in progress. Windows x64 compilation, the native regression suite,
-preset-cache generation and application CLI smoke checks passed at
-`d0697368a5ee0aa7b4f9e2d8249d3e83c91876f9` in
-https://github.com/fbriceno97/OrcaSlicer/actions/runs/41341708733.
+The complete Windows x64 workflow succeeded at
+`c8883d7da1ae9f401dc1b3f7aedaadb0e7335e78`:
+https://github.com/fbriceno97/OrcaSlicer/actions/runs/41347476594.
+Compilation, the exception checker's nine regression cases and actual core-PDB
+inspection, native tests, preset-cache generation, application CLI smoke checks,
+installer creation and synthetic install/uninstall coexistence checks passed.
+All software gates run before application artifact uploads. MSIX packaging is
+opt-in and disabled for these custom installer/portable builds.
+
 Native results: 3,286 cases; 3,284 passed, zero failed, two skipped. The standard
 suite excludes NotWorking and RequiresApp. All ten re-enabled cloud mock/loopback
 cases are included. The legacy filename-protection failure is fixed, and raft
-centroid coverage now explicitly separates isolated from overlapping rafts without
+centroid coverage explicitly separates isolated from overlapping rafts without
 changing native support generation or G-code.
 
-Installer creation passed, but synthetic install/uninstall coexistence verification
-failed. Application artifact uploads correctly stayed blocked. Diagnostic rerun:
-https://github.com/fbriceno97/OrcaSlicer/actions/runs/41343276089.
+### Windows x64 test artifacts
+
+These are Actions test artifacts, not a published installer release. Download the
+installer artifact and extract its .exe, or extract the portable artifact to its
+own folder and run unlayered-slicer.exe. They were built from the tested commit
+above; later documentation-only commits do not change their application source.
+
+| Artifact | Download | Actions archive SHA256 |
+| --- | --- | --- |
+| Installer | [Actions artifact](https://github.com/fbriceno97/OrcaSlicer/actions/runs/41347476594/artifacts/13100452556) | `eae27ae14400623fd05daec2c48d203cebea61eac90622ad4d467dd777a579cb` |
+| Portable | [Actions artifact](https://github.com/fbriceno97/OrcaSlicer/actions/runs/41347476594/artifacts/13100397955) | `90fb93e0576304ff93d6861143646554bd11e11c5f1d56e8816c6c6ad1b8a81d` |
+| Native JUnit report | [Actions artifact](https://github.com/fbriceno97/OrcaSlicer/actions/runs/41347476594/artifacts/13100073476) | `287aec6ed6c82759f25d363f94772eeef0770a25b8338bdfcf76f816f0adec00` |
+
+Digests identify the Actions ZIP archives, not the installer executable inside.
+
+
+The synthetic installer test creates disposable Beta 5 install/profile/registry
+sentinels, checks product identity and a separate custom uninstall entry, then
+uninstalls and checks that the custom executable/entry/shortcut are removed while
+Beta 5 sentinels survive. It found an orphaned custom desktop shortcut, fixed by
+matching unconditional cleanup. It does not verify a real existing Beta 5 install.
+
 Live cloud login/synchronization, Connect handoff and interactive Windows segment
 selection, direction assignment, preview and export remain unverified. No Windows
 desktop session is available in this environment. Physical clearance/printing checks
@@ -64,8 +103,13 @@ or interactive Windows GUI verification.
 Beta 5's Bambu account adapter, login controls and privacy-policy dialog are restored;
 Orca Cloud transport is re-enabled with its Beta 5 endpoints and public client key.
 The credential-store service is UnlayeredCustomBeta/Auth, so existing applications'
-stored credentials are not read or changed. Cloud authentication and synchronization
-still require runtime verification. Source inspection is not GUI verification.
+stored credentials are not read or changed. On the Home page, Orca Cloud's Login
+control appears by default outside Stealth Mode. In Preferences, enable **Enable
+Bambu Cloud** to show the Bambu account row; install the optional Bambu network
+plug-in to use that account. Sign in again in this application: importing presets
+does not transfer the other application's credentials. Cloud authentication and
+synchronization still require runtime verification. Source inspection is not GUI
+verification.
 
 Local isolated bucket traversal matches pinned Beta 5 in all 216 synthetic cases.
 This check does not exercise native mesh adjacency/subdivision, painting controls,
