@@ -498,6 +498,17 @@ jobs:
             [xml]$report = Get-Content ctest_results.xml -Raw
             $suite = $report.testsuite
             Write-Output ("::notice title=Native CTest results::tests=" + $suite.tests + "; failures=" + $suite.failures + "; skipped=" + $suite.skipped + "; excludes=NotWorking,RequiresApp")
+            foreach ($case in $suite.SelectNodes('./testcase[failure]')) {
+              $details = $case.SelectSingleNode('system-out')
+              $message = $case.GetAttribute('name')
+              if ($details) {
+                $tail = ($details.InnerText -split "`n" | Select-Object -Last 25) -join "`n"
+                $message += "`n" + $tail
+              }
+              if ($message.Length -gt 6000) { $message = $message.Substring(0, 6000) }
+              $message = $message.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+              Write-Output ("::error title=Native regression failure::" + $message)
+            }
             if ([int]$suite.tests -eq 0) { throw "No native regression tests ran" }
           }
 
