@@ -554,7 +554,7 @@ TEST_CASE("Each sliced cube's center of mass is its center, and the brim lowers 
 TEST_CASE("Raft mass stays below isolated cubes and is conserved for touching cubes", "[GCodeProcessor]")
 {
     const bool separated = GENERATE(true, false);
-    INFO(separated ? "isolated rafts" : "touching cubes with overlapping rafts");
+    INFO((separated ? "isolated rafts" : "touching cubes with overlapping rafts"));
     DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
     config.set_deserialize_strict({ { "skirt_loops", 0 }, { "brim_type", "no_brim" }, { "raft_layers", 3 } });
     Print print;
