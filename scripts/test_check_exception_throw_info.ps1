@@ -35,13 +35,13 @@ Write-Dump "$work\clean.txt" @($copy, $trivial)
 Write-Dump "$work\empty.txt" @()
 Write-Dump "$work\a dir, with a comma\clean.txt" @($copy)
 
-# A build directory whose compiler has an llvm-pdbutil beside it but no OrcaSlicer.pdb.
+# A build directory whose compiler has an llvm-pdbutil beside it but no UnlayeredSlicer.pdb.
 # Nothing runs the stand-in; the check stops before it gets there.
 $build = "$work\build"
 New-Item -ItemType Directory -Force -Path "$build\bin", "$build\src\Release" | Out-Null
 Copy-Item "$env:SystemRoot\System32\where.exe" "$build\bin\llvm-pdbutil.exe"
 Set-Content -Path "$build\CMakeCache.txt" -Encoding ascii -Value "CMAKE_CXX_COMPILER:FILEPATH=$build\bin\clang-cl.exe"
-Set-Content -Path "$build\src\Release\orca-slicer.pdb" -Value ''
+Set-Content -Path "$build\src\Release\unlayered-slicer.pdb" -Value ''
 $bare = "$work\bare"
 New-Item -ItemType Directory -Force -Path $bare | Out-Null
 Set-Content -Path "$bare\CMakeCache.txt" -Encoding ascii -Value 'CMAKE_CXX_COMPILER:STRING=no-such-clang-cl.exe'
@@ -57,8 +57,8 @@ $cases = @(
        Exit = 1; Contains = @('broken.txt: 2 exception classes', 'clean.txt: 2 exception classes') }
     @{ Name = 'a path with a comma stays whole'; Args = @('-Dump', "$work\a dir, with a comma\clean.txt")
        Exit = 0; Contains = @('clean.txt: 1 exception classes') }
-    @{ Name = 'a build without OrcaSlicer.pdb fails'; Args = @('-BuildDir', $build)
-       Exit = 1; Contains = @('No OrcaSlicer.pdb in') }
+    @{ Name = 'a build without UnlayeredSlicer.pdb fails'; Args = @('-BuildDir', $build)
+       Exit = 1; Contains = @('No UnlayeredSlicer.pdb in') }
     @{ Name = 'a compiler that is not on PATH is named'; Args = @('-BuildDir', $bare)
        Exit = 1; Contains = @('no-such-clang-cl.exe, the compiler in') }
     @{ Name = 'a missing build directory is named'; Args = @('-BuildDir', "$work\nowhere")

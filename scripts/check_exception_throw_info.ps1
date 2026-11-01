@@ -18,7 +18,7 @@
 
 .PARAMETER BuildDir
     The slicer build directory. Its CMakeCache.txt names the compiler, and its src\<Config>
-    holds the PDBs to check, which must include OrcaSlicer.pdb.
+    holds the PDBs to check, which must include UnlayeredSlicer.pdb.
 
 .PARAMETER Config
     The configuration whose PDBs to check (default: Release).
@@ -76,10 +76,10 @@ if (-not $Dump) {
 
     $Pdb = Split-PathList $Pdb
     if (-not $Pdb) {
-        # OrcaSlicer.dll holds the slicer itself, so a check without it proves nothing.
+        # UnlayeredSlicer.dll holds the slicer itself, so a check without it proves nothing.
         $pdbDir = Join-Path $BuildDir "src\$Config"
-        if (-not (Test-Path (Join-Path $pdbDir 'OrcaSlicer.pdb'))) {
-            throw "No OrcaSlicer.pdb in $pdbDir."
+        if (-not (Test-Path (Join-Path $pdbDir 'UnlayeredSlicer.pdb'))) {
+            throw "No UnlayeredSlicer.pdb in $pdbDir."
         }
         $Pdb = @(Get-ChildItem $pdbDir -Filter *.pdb | ForEach-Object FullName)
     }
@@ -109,7 +109,7 @@ try {
 
         $broken = @($kinds.Keys | Where-Object { $kinds[$_].Count -eq 2 } | Sort-Object)
         "$(Split-Path -Leaf $file): $($kinds.Count) exception classes, $($broken.Count) with broken throw info"
-        foreach ($class in $broken) { "    $class" }
+        foreach ($class in $broken) { "    $class"; Write-Output ("::error title=Broken exception throw info::" + $class) }
         if ($broken.Count -gt 0) { $failed = $true }
         $classes += $kinds.Count
     }
@@ -119,7 +119,7 @@ try {
 
 # The slicer's PDBs always contain exception throw info, so finding none means the dump format or the PDBs changed.
 if ($classes -eq 0) {
-    'No exception classes found. Check that llvm-pdbutil still prints public symbols in backticks.'
+    Write-Output '::error::No exception classes found. Check that llvm-pdbutil still prints public symbols in backticks.'
     $failed = $true
 }
 

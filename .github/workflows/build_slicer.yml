@@ -17,6 +17,11 @@ on:
           required: false
           type: string
           default: msvc
+        package-msix:
+          description: Optional Store package; custom test builds provide NSIS and portable only
+          required: false
+          type: boolean
+          default: false
         macos-combine-only:
           required: false
           type: boolean
@@ -483,6 +488,22 @@ jobs:
           }
         shell: pwsh
 
+      - name: Check exception throw info Win
+        if: runner.os == 'Windows' && inputs.compiler == 'clang'
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        run: |
+          try {
+            ./scripts/test_check_exception_throw_info.ps1
+            if ($LASTEXITCODE -ne 0) { throw "Exception checker regression tests failed" }
+            ./scripts/check_exception_throw_info.ps1 -BuildDir $env:BUILD_DIR
+            if ($LASTEXITCODE -ne 0) { throw "Exception metadata validation failed" }
+          } catch {
+            $message = ($_.ToString() + "`n" + $_.ScriptStackTrace).Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output ("::error title=Exception metadata validation::" + $message)
+            throw
+          }
+
       - name: Run Windows software regression checks before packaging
         if: runner.os == 'Windows'
         shell: bash
@@ -618,15 +639,8 @@ jobs:
           name: Unlayered_Slicer_profile_validator_Windows_${{ env.ver }}
           path: ${{ github.workspace }}/build/src/Release/UnlayeredSlicer_profile_validator.exe
 
-      - name: Check exception throw info Win
-        if: runner.os == 'Windows' && inputs.compiler == 'clang'
-        working-directory: ${{ github.workspace }}
-        # After the uploads, so a failure still leaves the build and its PDB to inspect, and before any deploy.
-        shell: pwsh
-        run: scripts\check_exception_throw_info.ps1 -BuildDir $env:BUILD_DIR
-
       - name: Build MSIX Store package Win
-        if: runner.os == 'Windows' && !vars.SELF_HOSTED
+        if: runner.os == 'Windows' && !vars.SELF_HOSTED && inputs.package-msix
         working-directory: ${{ github.workspace }}
         shell: pwsh
         run: |
@@ -639,7 +653,7 @@ jobs:
             -PublisherDisplayName "${{ vars.ORCA_MSIX_PUBLISHER_DISPLAY_NAME || 'Unlayered 3D' }}"
 
       - name: Upload artifacts Win MSIX
-        if: runner.os == 'Windows' && !vars.SELF_HOSTED
+        if: runner.os == 'Windows' && !vars.SELF_HOSTED && inputs.package-msix
         uses: actions/upload-artifact@v7
         with:
           name: Unlayered_Custom_Beta_Windows_MSIX_${{ env.ver }}${{ env.ARCH_SUFFIX }}
