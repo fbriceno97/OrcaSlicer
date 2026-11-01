@@ -490,6 +490,17 @@ jobs:
           CTEST_PARALLEL_LEVEL: 2
         run: scripts/run_unit_tests.sh "$BUILD_DIR/tests" Release
 
+      - name: Report native regression outcomes
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Test-Path ctest_results.xml) {
+            [xml]$report = Get-Content ctest_results.xml -Raw
+            $suite = $report.testsuite
+            Write-Output ("::notice title=Native CTest results::tests=" + $suite.tests + "; failures=" + $suite.failures + "; skipped=" + $suite.skipped + "; excludes=NotWorking,RequiresApp")
+            if ([int]$suite.tests -eq 0) { throw "No native regression tests ran" }
+          }
+
       - name: Build system preset cache (Windows)
         if: runner.os == 'Windows'
         shell: cmd
