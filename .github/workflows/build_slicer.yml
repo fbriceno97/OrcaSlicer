@@ -473,7 +473,14 @@ jobs:
           $deps = (Split-Path "${{ github.workspace }}/${{ inputs.cache-path }}").Replace('\', '/')
           # -l compiles with Visual Studio's clang-cl and -x builds with Ninja; --msvc --msbuild is cl under the Visual Studio generator.
           $flags = if ("${{ inputs.compiler }}" -eq "clang") { "-l", "-x" } else { "--msvc", "--msbuild" }
-          .\build_win.bat -s --tests -i --arch ${{ inputs.arch }} --build-dir $env:BUILD_DIR --deps-dir $deps @flags
+          .\build_win.bat -s --tests -i --arch ${{ inputs.arch }} --build-dir $env:BUILD_DIR --deps-dir $deps @flags 2>&1 | Tee-Object -FilePath build-windows.log
+          $buildExit = $LASTEXITCODE
+          if ($buildExit -ne 0) {
+            Get-Content build-windows.log | Select-String 'error:|fatal error|CMake Error|FAILED:' | Select-Object -Last 20 | ForEach-Object {
+              Write-Output ("::error::" + $_.Line)
+            }
+            exit $buildExit
+          }
         shell: pwsh
 
       - name: Run Windows software regression checks before packaging

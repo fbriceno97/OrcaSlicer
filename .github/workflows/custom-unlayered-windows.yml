@@ -3,6 +3,9 @@ on:
   push:
     branches: [feature/unlayered-base-custom-beta]
   workflow_dispatch:
+concurrency:
+  group: custom-unlayered-windows-${{ github.ref }}
+  cancel-in-progress: false
 permissions:
   contents: read
   actions: write
