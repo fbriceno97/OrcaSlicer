@@ -442,26 +442,13 @@ std::string VersionInfo::convert_short_version(std::string full_version)
 #ifdef _WIN32
 bool is_associate_files(std::wstring extend)
 {
-    wchar_t app_path[MAX_PATH];
-    ::GetModuleFileNameW(nullptr, app_path, sizeof(app_path));
-
-    std::wstring prog_id             = L" Unlayered.Slicer.1";
-    std::wstring reg_base            = L"Software\\Classes";
-    std::wstring reg_extension       = reg_base + L"\\." + extend;
-
-    wchar_t szValueCurrent[1000];
-    DWORD   dwType;
-    DWORD   dwSize = sizeof(szValueCurrent);
-
-    int iRC = ::RegGetValueW(HKEY_CURRENT_USER, reg_extension.c_str(), nullptr, RRF_RT_ANY, &dwType, szValueCurrent, &dwSize);
-
-    bool bDidntExist = iRC == ERROR_FILE_NOT_FOUND;
-
-    if (!bDidntExist && ::wcscmp(szValueCurrent, prog_id.c_str()) == 0)
-        return true;
-
-    return false;
+    DWORD type = 0;
+    DWORD size = 0;
+    const std::wstring key = L"Software\\Classes\\." + extend + L"\\OpenWithProgids";
+    return ::RegGetValueW(HKEY_CURRENT_USER, key.c_str(), L"Unlayered.CustomBeta.Model",
+                          RRF_RT_REG_SZ, &type, nullptr, &size) == ERROR_SUCCESS;
 }
+
 #endif
 
 class SplashScreen : public wxSplashScreen
@@ -969,7 +956,7 @@ std::vector<std::string> GUI_App::split_str(std::string src, std::string separat
 // same download Preferences > Online uses. Returns true at most once per installer opt-in.
 static bool take_installer_network_plugin_request(AppConfig* app_config)
 {
-    static const wchar_t* key   = L"Software\\Unlayered 3D\\Unlayered Slicer";
+    static const wchar_t* key   = L"Software\\FBriceno Custom Builds\\UnlayeredCustomBeta";
     static const wchar_t* value = L"InstallBambuNetworkPlugin";
     DWORD data = 0;
     DWORD size = sizeof(data);
@@ -3652,7 +3639,7 @@ void clear_webview2_cache_after_update(const boost::filesystem::path& user_data_
 // init_webview_runtime() runs, comes after MainFrame).
 void choose_webview2_user_data_folder()
 {
-    static const wchar_t* PRIMARY = L"Local\\UnlayeredSlicer.WebView2.Primary";
+    static const wchar_t* PRIMARY = L"Local\\UnlayeredCustomBeta.WebView2.Primary";
     constexpr int         MAX_SLOTS = 32;
     const wxString        instances = wxStandardPaths::Get().GetUserLocalDataDir() + wxS("\\EBWebView-instances\\");
 
@@ -3684,7 +3671,7 @@ void choose_webview2_user_data_folder()
     }
 
     for (int slot = 1; slot <= MAX_SLOTS; ++slot) {
-        const std::wstring name   = L"Local\\UnlayeredSlicer.WebView2.Slot." + std::to_wstring(slot);
+        const std::wstring name   = L"Local\\UnlayeredCustomBeta.WebView2.Slot." + std::to_wstring(slot);
         HANDLE             handle = ::CreateMutexW(nullptr, FALSE, name.c_str());
         if (handle == nullptr)
             continue; // ACCESS_DENIED: held by a window with other rights
@@ -3730,7 +3717,7 @@ public:
             hash ^= c;
             hash *= 1099511628211ull;
         }
-        const std::wstring name = L"Local\\UnlayeredSlicer.ProfileSync." + std::to_wstring(hash);
+        const std::wstring name = L"Local\\UnlayeredCustomBeta.ProfileSync." + std::to_wstring(hash);
         m_handle                = ::CreateMutexW(nullptr, FALSE, name.c_str());
         if (m_handle == nullptr) {
             BOOST_LOG_TRIVIAL(warning) << "profile lock: CreateMutex failed (" << ::GetLastError() << "); " << what << " without it";
@@ -4099,7 +4086,7 @@ bool GUI_App::on_init_inner()
             associate_files(L"step");
             associate_files(L"stp");
         }
-        associate_url(L"unlayeredslicer");
+        associate_url(L"unlayeredcustombeta");
 
         if (app_config->get("associate_gcode") == "true")
             associate_files(L"gcode");
@@ -7226,6 +7213,8 @@ struct Candidate
 
 void GUI_App::check_new_version_sf(int by_user)
 {
+    // Custom builds are distributed only as test artifacts, never by the stock update channel.
+    return;
     AppConfig*        app_config        = wxGetApp().app_config;
     const bool        check_stable_only = app_config->get_bool("check_stable_update_only");
     // Platform and architecture, so the site answers with this platform's release: a Mac must not
@@ -9904,7 +9893,7 @@ void GUI_App::open_preferences(PreferencesTab tab, const std::string& highlight_
                     associate_files(L"step");
                     associate_files(L"stp");
                 }
-                associate_url(L"unlayeredslicer");
+                associate_url(L"unlayeredcustombeta");
             }
             else {
                 if (app_config->get("associate_gcode") == "true")
@@ -11186,14 +11175,14 @@ bool GUI_App::open_browser_with_warning_dialog(const wxString& url, int flags/* 
 
 
 #ifdef __WXMSW__
-static bool set_into_win_registry(HKEY hkeyHive, const wchar_t* pszVar, const wchar_t* pszValue)
+static bool set_into_win_registry(HKEY hkeyHive, const wchar_t* pszVar, const wchar_t* pszValue, const wchar_t* value_name = nullptr)
 {
     // see as reference: https://stackoverflow.com/questions/20245262/c-program-needs-an-file-association
     wchar_t szValueCurrent[1000];
     DWORD dwType;
     DWORD dwSize = sizeof(szValueCurrent);
 
-    int iRC = ::RegGetValueW(hkeyHive, pszVar, nullptr, RRF_RT_ANY, &dwType, szValueCurrent, &dwSize);
+    int iRC = ::RegGetValueW(hkeyHive, pszVar, value_name, RRF_RT_ANY, &dwType, szValueCurrent, &dwSize);
 
     bool bDidntExist = iRC == ERROR_FILE_NOT_FOUND;
 
@@ -11212,16 +11201,16 @@ static bool set_into_win_registry(HKEY hkeyHive, const wchar_t* pszVar, const wc
     }
 
     DWORD dwDisposition;
-    HKEY hkey;
+    HKEY hkey = nullptr;
     iRC = ::RegCreateKeyExW(hkeyHive, pszVar, 0, 0, 0, KEY_ALL_ACCESS, nullptr, &hkey, &dwDisposition);
     bool ret = false;
     if (iRC == ERROR_SUCCESS) {
-        iRC = ::RegSetValueExW(hkey, L"", 0, REG_SZ, (BYTE*)pszValue, (::wcslen(pszValue) + 1) * sizeof(wchar_t));
+        iRC = ::RegSetValueExW(hkey, value_name, 0, REG_SZ, (BYTE*)pszValue, (::wcslen(pszValue) + 1) * sizeof(wchar_t));
         if (iRC == ERROR_SUCCESS)
             ret = true;
     }
 
-    RegCloseKey(hkey);
+    if (hkey) RegCloseKey(hkey);
     return ret;
 }
 
@@ -11261,8 +11250,8 @@ void GUI_App::associate_files(std::wstring extend)
     ::GetModuleFileNameW(nullptr, app_path, sizeof(app_path));
 
     std::wstring prog_path = L"\"" + std::wstring(app_path) + L"\"";
-    std::wstring prog_id = L" Unlayered.Slicer.1";
-    std::wstring prog_desc = L"Unlayered Slicer";
+    std::wstring prog_id = L"Unlayered.CustomBeta.Model";
+    std::wstring prog_desc = L"Unlayered Custom Beta";
     std::wstring prog_command = prog_path + L" \"%1\"";
     std::wstring reg_base = L"Software\\Classes";
     std::wstring reg_extension = reg_base + L"\\." + extend;
@@ -11270,7 +11259,7 @@ void GUI_App::associate_files(std::wstring extend)
     std::wstring reg_prog_id_command = reg_prog_id + L"\\Shell\\Open\\Command";
 
     bool is_new = false;
-    is_new |= set_into_win_registry(HKEY_CURRENT_USER, reg_extension.c_str(), prog_id.c_str());
+    is_new |= set_into_win_registry(HKEY_CURRENT_USER, (reg_extension + L"\\OpenWithProgids").c_str(), L"", prog_id.c_str());
     is_new |= set_into_win_registry(HKEY_CURRENT_USER, reg_prog_id.c_str(), prog_desc.c_str());
     is_new |= set_into_win_registry(HKEY_CURRENT_USER, reg_prog_id_command.c_str(), prog_command.c_str());
     if (is_new)
@@ -11288,8 +11277,8 @@ void GUI_App::disassociate_files(std::wstring extend)
     ::GetModuleFileNameW(nullptr, app_path, sizeof(app_path));
 
     std::wstring prog_path = L"\"" + std::wstring(app_path) + L"\"";
-    std::wstring prog_id = L" Unlayered.Slicer.1";
-    std::wstring prog_desc = L"Unlayered Slicer";
+    std::wstring prog_id = L"Unlayered.CustomBeta.Model";
+    std::wstring prog_desc = L"Unlayered Custom Beta";
     std::wstring prog_command = prog_path + L" \"%1\"";
     std::wstring reg_base = L"Software\\Classes";
     std::wstring reg_extension = reg_base + L"\\." + extend;
@@ -11297,7 +11286,7 @@ void GUI_App::disassociate_files(std::wstring extend)
     std::wstring reg_prog_id_command = reg_prog_id + L"\\Shell\\Open\\Command";
 
     bool is_new = false;
-    is_new |= del_win_registry(HKEY_CURRENT_USER, reg_extension.c_str(), prog_id.c_str());
+    is_new |= ::RegDeleteKeyValueW(HKEY_CURRENT_USER, (reg_extension + L"\\OpenWithProgids").c_str(), prog_id.c_str()) == ERROR_SUCCESS;
 
     bool is_associate_3mf  = app_config->get("associate_3mf") == "true";
     bool is_associate_stl  = app_config->get("associate_stl") == "true";

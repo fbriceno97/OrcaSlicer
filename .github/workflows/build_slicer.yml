@@ -476,6 +476,13 @@ jobs:
           .\build_win.bat -s --tests -i --arch ${{ inputs.arch }} --build-dir $env:BUILD_DIR --deps-dir $deps @flags
         shell: pwsh
 
+      - name: Run Windows software regression checks before packaging
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ctest --test-dir "$env:BUILD_DIR/tests" -C Release --output-on-failure --parallel 2
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Build system preset cache (Windows)
         if: runner.os == 'Windows'
         shell: cmd
@@ -511,7 +518,7 @@ jobs:
         if: runner.os == 'Windows'
         working-directory: ${{ github.workspace }}/${{ env.BUILD_DIR }}
         shell: cmd
-        run: '"C:/Program Files/7-Zip/7z.exe" a -tzip Unlayered_Slicer_Windows_${{ env.ver }}${{ env.ARCH_SUFFIX }}_portable.zip ${{ github.workspace }}/${{ env.BUILD_DIR }}/UnlayeredSlicer'
+        run: '"C:/Program Files/7-Zip/7z.exe" a -tzip Unlayered_Custom_Beta_Windows_${{ env.ver }}${{ env.ARCH_SUFFIX }}_portable.zip ${{ github.workspace }}/${{ env.BUILD_DIR }}/UnlayeredSlicer'
 
       - name: Pack PDB
         if: runner.os == 'Windows' && inputs.arch != 'arm64' && !vars.SELF_HOSTED
@@ -523,18 +530,18 @@ jobs:
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
-          name: Unlayered_Slicer_Windows_${{ env.ver }}${{ env.ARCH_SUFFIX }}_portable
+          name: Unlayered_Custom_Beta_Windows_${{ env.ver }}${{ env.ARCH_SUFFIX }}_portable
           path: ${{ github.workspace }}/${{ env.BUILD_DIR }}/UnlayeredSlicer
 
       - name: Upload artifacts Win installer
         if: runner.os == 'Windows' && !vars.SELF_HOSTED
         uses: actions/upload-artifact@v7
         with:
-          name: Unlayered_Slicer_Windows_${{ env.ver }}${{ env.ARCH_SUFFIX }}
+          name: Unlayered_Custom_Beta_Windows_${{ env.ver }}${{ env.ARCH_SUFFIX }}
           # The exact name CPack produces, from CPACK_PACKAGE_FILE_NAME in CMakeLists.txt (which
           # appends ARCH_SUFFIX). Not a glob: a glob that matches nothing makes this step a silent
           # no-op, which is how the installer quietly stopped being uploaded after the rebrand.
-          path: ${{ github.workspace }}/${{ env.BUILD_DIR }}/Unlayered_Slicer_Windows_Installer_V${{ env.ver_pure }}${{ env.ARCH_SUFFIX }}.exe
+          path: ${{ github.workspace }}/${{ env.BUILD_DIR }}/Unlayered_Custom_Beta_Windows_Installer_V${{ env.ver_pure }}${{ env.ARCH_SUFFIX }}.exe
           if-no-files-found: error
 
       - name: Upload artifacts Win PDB
@@ -575,7 +582,7 @@ jobs:
         if: runner.os == 'Windows' && !vars.SELF_HOSTED
         uses: actions/upload-artifact@v7
         with:
-          name: Unlayered_Slicer_Windows_MSIX_${{ env.ver }}${{ env.ARCH_SUFFIX }}
+          name: Unlayered_Custom_Beta_Windows_MSIX_${{ env.ver }}${{ env.ARCH_SUFFIX }}
           path: ${{ github.workspace }}/${{ env.BUILD_DIR }}/UnlayeredSlicer_Windows_MSIX_${{ env.ver }}${{ env.ARCH_SUFFIX }}.msix
 
 # Ubuntu

@@ -120,7 +120,7 @@ bool same_path(const fs::path &a, const fs::path &b)
 }
 
 // Must match CPACK_PACKAGE_INSTALL_REGISTRY_KEY and CPACK_NSIS_UNINSTALL_NAME in CMakeLists.txt.
-constexpr const wchar_t *UNINSTALL_KEY  = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\Unlayered Slicer";
+constexpr const wchar_t *UNINSTALL_KEY  = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\UnlayeredCustomBeta";
 constexpr const char    *UNINSTALL_NAME = "Uninstall.exe";
 
 std::wstring read_reg_string(HKEY root, const wchar_t *key, const wchar_t *value)
@@ -592,6 +592,8 @@ bool download_installer(const AppUpdateAsset &asset, fs::path &dest_out, AppUpda
 
 bool launch_installer(const fs::path &installer, std::string &error_out)
 {
+    error_out = "Stock upstream installers cannot update this custom build.";
+    return false;
 #if defined(_WIN32)
     // The wstring must outlive the ShellExecuteExW call, so it is held in a named local. Assigning
     // lpFile straight from a path conversion leaves a dangling pointer.
@@ -637,6 +639,8 @@ bool launch_installer(const fs::path &installer, std::string &error_out)
 
 bool launch_silent_update(const fs::path &installer, const fs::path &install_dir, bool relaunch, std::string &error_out)
 {
+    error_out = "Stock upstream installers cannot update this custom build.";
+    return false;
 #if defined(_WIN32)
     const std::wstring file = installer.wstring();
     // /UPDATE, /WAITPID and /RELAUNCH are ours (cmake/modules/NSIS.template.in). /D must come last

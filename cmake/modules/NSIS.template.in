@@ -1117,7 +1117,7 @@ Function .onInit
   ${If} $UPDATE_MODE == "1"
     ; Recreate the desktop shortcut only if the person still has one; an update must not put back
     ; a shortcut they deleted.
-    IfFileExists "$DESKTOP\UnlayeredSlicer.lnk" 0 +2
+    IfFileExists "$DESKTOP\UnlayeredCustomBeta.lnk" 0 +2
       StrCpy $DESKTOP_LINK_EXISTED "1"
     ; The slicer only self-updates a per-user install, so there is no per-machine copy to migrate
     ; from here, and a UAC prompt from an invisible installer would be inexplicable.

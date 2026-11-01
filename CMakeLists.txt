@@ -1409,12 +1409,12 @@ endif ()
 install(FILES ${CMAKE_SOURCE_DIR}/LICENSE.txt DESTINATION ".")
 configure_file(${LIBDIR}/dev-utils/platform/unix/fhs.hpp.in ${LIBDIR_BIN}/dev-utils/platform/unix/fhs.hpp)
 
-set (CPACK_PACKAGE_NAME "Unlayered Slicer")
-set (CPACK_PACKAGE_VENDOR "Unlayered 3D")
+set (CPACK_PACKAGE_NAME "Unlayered Custom Beta")
+set (CPACK_PACKAGE_VENDOR "FBriceno Custom Builds")
 set (CPACK_PACKAGE_VERSION_MAJOR "${ORCA_VERSION_MAJOR}")
 set (CPACK_PACKAGE_VERSION_MINOR "${ORCA_VERSION_MINOR}")
 set (CPACK_PACKAGE_VERSION_PATCH "${ORCA_VERSION_PATCH}")
-set (CPACK_PACKAGE_FILE_NAME "Unlayered_Slicer_Windows_Installer_V${UNLAYERED_VERSION}")
+set (CPACK_PACKAGE_FILE_NAME "Unlayered_Custom_Beta_Windows_Installer_V${UNLAYERED_VERSION}")
 # Suffix the Windows installer with its target arch so the x64 and arm64 builds
 # produce distinct filenames (matches ARCH_SUFFIX in build_slicer.yml). Same
 # CMAKE_SYSTEM_PROCESSOR mapping used by unlayered_copy_dlls() above.
@@ -1426,7 +1426,7 @@ if (WIN32)
     endif ()
 endif ()
 set (CPACK_PACKAGE_DESCRIPTION_SUMMARY "Unlayered Slicer is an open source slicer for FDM printers")
-set (CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/Unlayered3D/Unlayered-Slicer")
+set (CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/fbriceno97/OrcaSlicer")
 set (CPACK_PACKAGE_INSTALL_DIRECTORY ${CPACK_PACKAGE_NAME})
 set (CPACK_PACKAGE_ICON "${CMAKE_SOURCE_DIR}/resources/images\\\\UnlayeredSlicer.ico")
 set (CPACK_NSIS_MUI_ICON "${CPACK_PACKAGE_ICON}")
@@ -1437,15 +1437,15 @@ set (CPACK_NSIS_INSTALLED_ICON_NAME "unlayered-slicer.exe")
 set(CPACK_NSIS_EXTRA_INSTALL_COMMANDS "
     \\\${If} $UPDATE_MODE != \\\"1\\\"
     \\\${OrIf} $DESKTOP_LINK_EXISTED == \\\"1\\\"
-      CreateShortCut \\\"$DESKTOP\\\\UnlayeredSlicer.lnk\\\" \\\"$INSTDIR\\\\unlayered-slicer.exe\\\"
+      CreateShortCut \\\"$DESKTOP\\\\UnlayeredCustomBeta.lnk\\\" \\\"$INSTDIR\\\\unlayered-slicer.exe\\\"
     \\\${EndIf}
 ")
 set (CPACK_PACKAGE_CHECKSUM SHA256)
-set (CPACK_PACKAGE_INSTALL_REGISTRY_KEY "Unlayered Slicer")
+set (CPACK_PACKAGE_INSTALL_REGISTRY_KEY "UnlayeredCustomBeta")
 set (CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
 set (CPACK_NSIS_EXECUTABLES_DIRECTORY ".")
 # set (CPACK_NSIS_MODIFY_PATH "ON")
-set(CPACK_PACKAGE_EXECUTABLES "unlayered-slicer;Unlayered Slicer")
+set(CPACK_PACKAGE_EXECUTABLES "unlayered-slicer;Unlayered Custom Beta")
 set(CPACK_CREATE_DESKTOP_LINKS "unlayered-slicer")
 set (CPACK_RESOURCE_FILE_LICENSE ${CMAKE_SOURCE_DIR}/LICENSE.txt) # must also include in install command
 
@@ -1488,6 +1488,6 @@ set(CPACK_PROJECT_CONFIG_FILE "${CMAKE_SOURCE_DIR}/cmake/CPackInstallScope.cmake
 # Migrating existing installs cleanly needs a deliberate one-time step; it is
 # not handled here.
 
-set(CPACK_WIX_UPGRADE_GUID "058245e8-20e0-4a95-9ab7-1acfe17ad511")
+set(CPACK_WIX_UPGRADE_GUID "6a688781-9724-432f-ae84-a5ed7065c5ea")
 set(CPACK_GENERATOR NSIS)
 include(CPack)
