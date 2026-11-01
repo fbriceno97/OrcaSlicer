@@ -544,6 +544,15 @@ jobs:
           retention-days: 5
           if-no-files-found: error
 
+      - name: Upload Windows regression report
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-x64-regression-report
+          path: ctest_results.xml
+          if-no-files-found: error
+          retention-days: 5
+
       # NSIS is x86-only; it runs (and the installer it emits runs) under ARM64's
       # x86 emulation, packaging the native arm64 payload from build-arm64.
       - name: Create installer Win
@@ -557,7 +566,13 @@ jobs:
         shell: pwsh
         run: |
           $installer = "$env:BUILD_DIR/Unlayered_Custom_Beta_Windows_Installer_V${{ env.ver_pure }}${{ env.ARCH_SUFFIX }}.exe"
-          ./scripts/test_custom_side_by_side.ps1 -Installer $installer
+          try {
+            ./scripts/test_custom_side_by_side.ps1 -Installer $installer
+          } catch {
+            $message = ($_.ToString() + "`n" + $_.ScriptStackTrace).Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output ("::error title=Installer coexistence failure::" + $message)
+            throw
+          }
 
       - name: Pack app
         if: runner.os == 'Windows'
