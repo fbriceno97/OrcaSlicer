@@ -831,9 +831,10 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
     }
 
     static std::optional<Vec3d> section_custom_gcode_endpoint(std::string &gcode, Vec3d position,
-        double max_feedrate, double &feedrate, bool &reset_extrusion)
+        double max_feedrate, double &feedrate, bool &reset_extrusion, bool configured_relative_e)
     {
         bool relative = false, moved = false;
+        bool relative_e = configured_relative_e;
         unsigned conditional_depth = 0;
         double units = 1.;
         std::string bounded;
@@ -841,6 +842,10 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
         parser.parse_buffer(gcode, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
             const auto cmd = line.cmd();
             auto adjusted = line;
+            if (conditional_depth != 0 && (ascii_iequals(cmd, "G90") || ascii_iequals(cmd, "G91") ||
+                ascii_iequals(cmd, "G20") || ascii_iequals(cmd, "G21") ||
+                ascii_iequals(cmd, "M82") || ascii_iequals(cmd, "M83")))
+                throw std::runtime_error(_u8L("Conditional coordinate, unit or extrusion mode changes are not supported in section custom G-code."));
             if (ascii_iequals(cmd, "G90"))
                 relative = false;
             else if (ascii_iequals(cmd, "G91"))
@@ -849,6 +854,13 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
                 units = 25.4;
             else if (ascii_iequals(cmd, "G21"))
                 units = 1.;
+            else if (ascii_iequals(cmd, "M82"))
+                relative_e = false;
+            else if (ascii_iequals(cmd, "M83"))
+                relative_e = true;
+            else if (ascii_iequals(cmd, "G18") || ascii_iequals(cmd, "G19") ||
+                     ascii_iequals(cmd, "G90.1") || ascii_iequals(cmd, "G91.1"))
+                throw std::runtime_error(_u8L("Section custom G-code cannot change arc planes or arc-center positioning modes."));
             else if (ascii_iequals(cmd, "M622"))
                 ++conditional_depth;
             else if (ascii_iequals(cmd, "M623")) {
@@ -892,11 +904,13 @@ static std::vector<Vec2d> get_path_of_change_filament(const Print& print)
                      ascii_iequals(cmd, "M207") || ascii_iequals(cmd, "M566") ||
                      ascii_iequals(cmd, "SET_VELOCITY_LIMIT"))
                 throw std::runtime_error(_u8L("Section custom G-code must leave motion limits to generated G-code."));
+            else if (line.has(X) || line.has(Y) || line.has(Z))
+                throw std::runtime_error(_u8L("Section custom G-code contains an unsupported command with XYZ parameters."));
             bounded += adjusted.raw();
             bounded += '\n';
         });
-        if (relative || units != 1. || conditional_depth != 0)
-            throw std::runtime_error(_u8L("Section custom G-code must restore absolute XYZ positioning, millimeter units and firmware conditional state."));
+        if (relative || units != 1. || conditional_depth != 0 || relative_e != configured_relative_e)
+            throw std::runtime_error(_u8L("Section custom G-code must restore absolute XYZ positioning, millimeter units, the configured extrusion mode and firmware conditional state."));
         if (!position.allFinite())
             throw std::runtime_error(_u8L("Section custom G-code produced a nonfinite machine position."));
         gcode = std::move(bounded);
@@ -5459,7 +5473,8 @@ PlaceholderParserIntegration &ppi = m_placeholder_parser_integration;
             double final_feed = maximum_feed;
             bool reset_extrusion = false;
             raw_endpoint = section_custom_gcode_endpoint(output,
-                Vec3d(ppi.position[0], ppi.position[1], ppi.position[2]), maximum_feed, final_feed, reset_extrusion);
+                Vec3d(ppi.position[0], ppi.position[1], ppi.position[2]), maximum_feed, final_feed, reset_extrusion,
+                m_writer.config.use_relative_e_distances.value);
             if (reset_extrusion) {
                 if (!m_writer.config.use_relative_e_distances.value)
                     throw std::runtime_error(_u8L("Section G92 E0 resets require relative extrusion mode."));

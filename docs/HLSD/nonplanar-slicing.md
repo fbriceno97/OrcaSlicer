@@ -133,7 +133,9 @@ also move XY on tilted sections. Non-upward planes are rejected. Macros that
 move XY before using this height still require separate integration. Within an
 active section, parsed linear/arc XYZ endpoints synchronize the emitted pose,
 including relative moves and temporary inch units. Macros must restore absolute
-XYZ mode and millimeters. Homing and machine-origin/workspace changes reject the
+XYZ mode, millimeters and the configured extrusion mode. Conditional mode changes,
+arc-plane/arc-center mode changes, unmodeled XYZ commands, homing and
+machine-origin/workspace changes reject the
 template rather than leaving a guessed position. Explicit position-variable
 assignments retain their existing authoritative behavior. Raw XYZ motion receives
 the writer's conservative physical feed cap, including explicit feed commands

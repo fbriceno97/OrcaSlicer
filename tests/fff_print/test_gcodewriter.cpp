@@ -397,14 +397,20 @@ TEST_CASE("Section raw macros synchronize emitted XYZ after linear arc and relat
 
 TEST_CASE("Section raw macros reject unrepresentable coordinate state changes", "[GCodeWriter][Nonplanar]")
 {
+    const bool section = GENERATE(false, true);
     const std::string commands = GENERATE(std::string("G91\nG1 X1\n"), std::string("G20\n"),
         std::string("G92 Z0\n"), std::string("G28\n"), std::string("G54\n"),
         std::string("G1 E1\n"), std::string("G92 E1\n"), std::string("M204 S3000\n"),
-        std::string("M622 J1\nG1 X1\nM623\n"), std::string("M622 J1\n"));
+        std::string("M622 J1\nG1 X1\nM623\n"), std::string("M622 J1\n"),
+        std::string("G18\n"), std::string("G19\n"), std::string("G90.1\n"), std::string("G91.1\n"),
+        std::string("M82\n"), std::string("M622 J1\nG91\nM623\nG90\n"),
+        std::string("M622 J1\nG20\nM623\nG21\n"), std::string("M622 J1\nM83\nM623\n"),
+        std::string("G380 Z5\n"), std::string("M206 X10\n"));
     struct MacroGCode : GCode {
         MacroGCode()
         {
             PrintConfig config;
+            config.use_relative_e_distances.value = true;
             config.travel_speed_z.values = {4.};
             m_config.apply(config, true);
             m_writer.apply_print_config(config);
@@ -413,12 +419,43 @@ TEST_CASE("Section raw macros reject unrepresentable coordinate state changes", 
             m_placeholder_parser_integration.init(m_writer);
         }
     } generator;
-    generator.writer().set_section_transform(Transform3d::Identity());
+    if (section)
+        generator.writer().set_section_transform(Transform3d::Identity());
     const Vec3d initial(12., 15., 20.);
     generator.writer().set_position_from_custom_gcode(initial);
     const std::string output = generator.placeholder_parser_process("layer_change_gcode", commands, 0);
-    CHECK(output.find("!!!!!") != std::string::npos);
-    CHECK_THAT((generator.writer().position_for_custom_gcode() - initial).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+    CHECK((output.find("!!!!!") != std::string::npos) == section);
+    if (section)
+        CHECK_THAT((generator.writer().position_for_custom_gcode() - initial).norm(), Catch::Matchers::WithinAbs(0., 1e-9));
+}
+
+TEST_CASE("Section macros restore the configured extrusion mode before generated motion resumes", "[GCodeWriter][Nonplanar]")
+{
+    const bool relative = GENERATE(false, true);
+    struct ModeGCode : GCode {
+        explicit ModeGCode(bool relative)
+        {
+            PrintConfig config;
+            config.use_relative_e_distances.value = relative;
+            config.travel_speed_z.values = {4.};
+            m_config.apply(config, true);
+            m_writer.apply_print_config(config);
+            m_writer.set_extruders({0});
+            m_writer.set_extruder(0);
+            m_placeholder_parser_integration.init(m_writer);
+        }
+    } generator(relative);
+    generator.writer().set_section_transform(Transform3d::Identity());
+    generator.writer().set_position_from_custom_gcode(Vec3d(12., 15., 20.));
+    const std::string restored = relative ? "M82\nG1 X14\nM83\n" : "M83\nG1 X14\nM82\n";
+    const std::string output = generator.placeholder_parser_process("layer_change_gcode", restored, 0);
+    REQUIRE(output.find("!!!!!") == std::string::npos);
+    CHECK_THAT((generator.writer().position_for_custom_gcode() - Vec3d(14., 15., 20.)).norm(),
+        Catch::Matchers::WithinAbs(0., 1e-9));
+    const std::string unrestored = relative ? "M82\n" : "M83\n";
+    CHECK(generator.placeholder_parser_process("layer_change_gcode", unrestored, 0).find("!!!!!") != std::string::npos);
+    CHECK_THAT((generator.writer().position_for_custom_gcode() - Vec3d(14., 15., 20.)).norm(),
+        Catch::Matchers::WithinAbs(0., 1e-9));
 }
 
 TEST_CASE("Section E-only precision resets retain physical pose and deposited volume", "[GCodeWriter][Nonplanar]")
