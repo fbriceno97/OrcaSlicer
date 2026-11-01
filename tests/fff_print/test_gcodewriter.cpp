@@ -1711,17 +1711,33 @@ TEST_CASE("Bundled A1 and P2S layer templates export through tilted section fram
     GCodeReader reader;
     reader.apply_config(config);
     int section = -1;
+    float last_notification = -1.f;
+    size_t child_aux_fan_commands = 0;
     std::map<int, size_t> notifications;
     reader.parse_buffer(program, [&](GCodeReader &, const GCodeReader::GCodeLine &line) {
         if (line.raw().rfind("; SEGMENT_ID:", 0) == 0)
             section = std::stoi(line.raw().substr(13));
         if (line.cmd_is("M991")) {
             CHECK(section >= 0);
+            float layer_number = -1.f;
+            REQUIRE(line.has_value('P', layer_number));
+            CHECK(layer_number > last_notification);
+            last_notification = layer_number;
             ++notifications[section];
+        }
+        if (printer == "P2S" && section == 1 && line.cmd_is("M106")) {
+            float fan_id = -1.f, speed = -1.f;
+            if (line.has_value('P', fan_id) && fan_id == 10.f) {
+                REQUIRE(line.has_value('S', speed));
+                CHECK_THAT(speed, Catch::Matchers::WithinAbs(30. * 255. / 100., 0.01));
+                ++child_aux_fan_commands;
+            }
         }
     });
     CHECK(notifications[0] > 0);
     CHECK(notifications[1] > 0);
+    if (printer == "P2S")
+        CHECK(child_aux_fan_commands > 0);
     CHECK_NOTHROW(print.validate_nonplanar_gcode(result));
     if (const char *directory = std::getenv("ORCA_TEST_GCODE_ARTIFACT_DIR"); directory && *directory) {
         boost::filesystem::create_directories(directory);
