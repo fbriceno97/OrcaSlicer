@@ -18,6 +18,7 @@ on:
       - 'cmake/**'
       - 'version.inc'
       - '.github/workflows/build_all.yml'
+      - '.github/workflows/build_orca.yml'
   pull_request:
     branches:
       - main
@@ -30,6 +31,7 @@ on:
       - 'cmake/**'
       - 'version.inc'
       - '.github/workflows/build_all.yml'
+      - '.github/workflows/build_orca.yml'
   workflow_dispatch:
 
 permissions:

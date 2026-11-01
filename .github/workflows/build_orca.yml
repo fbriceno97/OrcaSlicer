@@ -608,6 +608,20 @@ jobs:
           if ((Get-Item $exe).VersionInfo.FileDescription -ne 'OrcaSlicer Custom Beta') {
             throw 'Incorrect executable display name'
           }
+          # Verify that installation uses the same launcher and runtime DLLs as
+          # the portable app whose engine was compiled and tested in this job.
+          $portable = Join-Path $env:BUILD_DIR 'OrcaSlicer'
+          $payload = @((Get-Item (Join-Path $portable 'orca-slicer-custom-beta.exe')))
+          $payload += @(Get-ChildItem $portable -Filter '*.dll' -File)
+          foreach ($source in $payload) {
+            $installed = Join-Path $dest $source.Name
+            if (!(Test-Path $installed)) { throw "Installed runtime missing: $($source.Name)" }
+            if ((Get-FileHash $source.FullName -Algorithm SHA256).Hash -ne
+                (Get-FileHash $installed -Algorithm SHA256).Hash) {
+              throw "Installer payload differs from compiled portable runtime: $($source.Name)"
+            }
+          }
+          Write-Host "PASS: installed launcher and $($payload.Count - 1) runtime DLLs match the portable build"
           $found = $false
           foreach ($view in @([Microsoft.Win32.RegistryView]::Registry64, [Microsoft.Win32.RegistryView]::Registry32)) {
             $hive = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, $view)
@@ -630,6 +644,8 @@ jobs:
           }
           if (!$found) { throw 'Custom app registration missing' }
           Write-Host 'PASS: installed launcher metadata and all six Open with associations'
+          $digest = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash
+          "$digest *$($installer.Name)" | Set-Content ($installer.FullName + '.sha256') -Encoding ascii
 
       - name: Preserve identity diagnostics on failure
         if: failure() && runner.os == 'Windows' && !inputs.feature-tests-only
@@ -663,13 +679,17 @@ jobs:
           path: ${{ github.workspace }}/${{ env.BUILD_DIR }}/OrcaSlicer
 
       - name: Upload artifacts Win installer
-        # Build/install locally for branding checks, but do not publish an
-        # experimental installer before integration and software checks pass.
-        if: runner.os == 'Windows' && !vars.SELF_HOSTED && !(github.repository == 'fbriceno97/OrcaSlicer' && (github.head_ref == 'feature/unlayered-wave-nonplanar' || github.ref_name == 'feature/unlayered-wave-nonplanar')) && !inputs.feature-tests-only
+        # An Actions test artifact, not a GitHub release. The experimental
+        # runtime has passed production slicing tests and installed identity/
+        # payload checks here; the full unit suite still gates readiness below.
+        if: runner.os == 'Windows' && !vars.SELF_HOSTED && !inputs.feature-tests-only
         uses: actions/upload-artifact@v7
         with:
-          name: OrcaSlicer_Windows_${{ env.ver }}${{ env.ARCH_SUFFIX }}
-          path: ${{ github.workspace }}/${{ env.BUILD_DIR }}/OrcaSlicer*.exe
+          name: OrcaSlicer_Windows_${{ env.ver }}${{ env.ARCH_SUFFIX }}${{ github.repository == 'fbriceno97/OrcaSlicer' && (github.head_ref == 'feature/unlayered-wave-nonplanar' || github.ref_name == 'feature/unlayered-wave-nonplanar') && '_experimental_installer' || '' }}
+          path: |
+            ${{ github.workspace }}/${{ env.BUILD_DIR }}/OrcaSlicer*.exe
+            ${{ github.workspace }}/${{ env.BUILD_DIR }}/OrcaSlicer*.exe.sha256
+          if-no-files-found: error
 
       - name: Upload artifacts Win PDB
         if: runner.os == 'Windows' && inputs.arch != 'arm64' && !vars.SELF_HOSTED && !inputs.feature-tests-only
