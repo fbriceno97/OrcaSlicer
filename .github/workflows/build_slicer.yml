@@ -514,6 +514,13 @@ jobs:
         run: |
           cpack -G NSIS
 
+      - name: Verify synthetic Beta 5 coexistence
+        if: runner.os == 'Windows' && !vars.SELF_HOSTED
+        shell: pwsh
+        run: |
+          $installer = "$env:BUILD_DIR/Unlayered_Custom_Beta_Windows_Installer_V${{ env.ver_pure }}${{ env.ARCH_SUFFIX }}.exe"
+          ./scripts/test_custom_side_by_side.ps1 -Installer $installer
+
       - name: Pack app
         if: runner.os == 'Windows'
         working-directory: ${{ github.workspace }}/${{ env.BUILD_DIR }}
