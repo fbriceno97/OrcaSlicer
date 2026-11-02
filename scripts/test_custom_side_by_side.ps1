@@ -42,6 +42,9 @@ try {
     if ((Get-Item $exe).VersionInfo.ProductName -ne 'Unlayered Custom Beta') {
         throw 'Installed executable has the wrong product identity'
     }
+    # Exercise the installed NSIS payload, not only the pre-packaging build tree.
+    python (Join-Path $PSScriptRoot 'check_setup_profiles.py') --profiles (Join-Path $target 'resources/profiles') --reference (Join-Path $PSScriptRoot '../resources/profiles')
+    if ($LASTEXITCODE -ne 0) { throw 'Installed setup profiles are incomplete' }
     if (-not (Test-Path $customKey)) { throw 'Separate custom uninstall entry is missing' }
     if (-not (Test-Path $customShortcut)) { throw 'Custom desktop shortcut is missing' }
 

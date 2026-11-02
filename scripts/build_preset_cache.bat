@@ -12,6 +12,8 @@ rem   target_dir  profiles directories to ship into. Caches are generated into
 rem               the source tree's resources\profiles, which is what every
 rem               packaging step copies from; a target may be that same
 rem               directory, which then only gets pruned.
+rem   --keep-json
+rem               copy caches while retaining the JSONs required by the setup wizard.
 rem   --prune-source
 rem               allow a target that is the directory the caches were generated
 rem               into (resources\profiles). Pruning it deletes the checkout's
@@ -35,7 +37,13 @@ setlocal enabledelayedexpansion
 set "REPO_ROOT=%~dp0.."
 
 set "PRUNE_SOURCE="
+set "KEEP_JSON="
 :parse_flags
+if /i "%~1"=="--keep-json" (
+    set "KEEP_JSON=1"
+    shift
+    goto :parse_flags
+)
 if /i "%~1"=="--prune-source" (
     set "PRUNE_SOURCE=1"
     shift
@@ -107,6 +115,8 @@ rem One run for every target: the vendor profiles are read before any pruning,
 rem so a target that is the source does not take the preset lists away from the
 rem targets after it, and one process does all the deleting.
 :prune
+rem GuideFrame still reads JSON manifests and presets, even when caches exist.
+if defined KEEP_JSON exit /b 0
 if not defined TARGETS exit /b 0
 powershell -NoProfile -ExecutionPolicy Bypass -File "%REPO_ROOT%\scripts\prune_cached_presets.ps1" -Profiles "%PROFILES%" %TARGETS%
 exit /b %errorlevel%

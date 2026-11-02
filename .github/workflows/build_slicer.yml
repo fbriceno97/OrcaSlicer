@@ -536,9 +536,16 @@ jobs:
       - name: Build system preset cache (Windows)
         if: runner.os == 'Windows'
         shell: cmd
-        # Shipped into both the already-installed tree (portable zip, MSIX) and
-        # the checkout cpack re-installs from when it builds the NSIS installer.
-        run: scripts\build_preset_cache.bat --prune-source "%BUILD_DIR%" "resources\profiles" "%BUILD_DIR%\UnlayeredSlicer\resources\profiles"
+        # Keep JSON: GuideFrame's first-run picker and filament pages still read
+        # manifests/presets directly. Caches alone only cover PresetBundle.
+        run: scripts\build_preset_cache.bat --keep-json "%BUILD_DIR%" "%BUILD_DIR%\UnlayeredSlicer\resources\profiles"
+
+      - name: Verify packaged first-run profiles
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python scripts/check_setup_profiles.py --profiles "$env:BUILD_DIR/UnlayeredSlicer/resources/profiles" --reference resources/profiles
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Exercise Windows application CLI
         if: runner.os == 'Windows'
