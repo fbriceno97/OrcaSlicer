@@ -54,11 +54,12 @@ not validate physical clearance or printing on Bambu A1/P2S.
 ## Validation status
 
 The complete Windows x64 workflow succeeded at
-`c8883d7da1ae9f401dc1b3f7aedaadb0e7335e78`:
-https://github.com/fbriceno97/OrcaSlicer/actions/runs/41347476594.
+`5a17d6ef078e5f889002ca35f0a2e3aaa97eb168`:
+https://github.com/fbriceno97/OrcaSlicer/actions/runs/41382693709.
 Compilation, the exception checker's nine regression cases and actual core-PDB
 inspection, native tests, preset-cache generation, application CLI smoke checks,
-installer creation and synthetic install/uninstall coexistence checks passed.
+installer creation, packaged/installed JSON profile integrity, and synthetic
+install/uninstall coexistence checks passed.
 All software gates run before application artifact uploads. MSIX packaging is
 opt-in and disabled for these custom installer/portable builds.
 
@@ -67,6 +68,23 @@ suite excludes NotWorking and RequiresApp. All ten re-enabled cloud mock/loopbac
 cases are included. The legacy filename-protection failure is fixed, and raft
 centroid coverage explicitly separates isolated from overlapping rafts without
 changing native support generation or G-code.
+
+### First-run printer selection fix
+
+Earlier cache-only candidates removed the JSON manifests and preset files still
+read directly by GuideFrame. This produced an empty printer picker even though
+PresetBundle could load the .opc caches. Windows builds now retain JSON alongside
+those caches. The old candidate downloads are superseded by the links below.
+
+The new gate verifies every referenced profile and compares all JSON file contents
+in the portable tree and actual NSIS installation against the checkout. The catalog
+contains 72 vendor manifests and 455 models, including Bambu A1 and P2S. A Chromium
+regression renders all 455 printer cards, selects A1/P2S, and checks that Next sends
+the saved selection and next-step request. It also rejects a cache-only fixture.
+The bridge is mocked: this is not an interactive native Windows wizard test.
+
+Close the older Custom Beta process before installing or starting its replacement.
+Keep Beta 5 and original profile folders intact; this fix needs no profile reset.
 
 ### Windows x64 test artifacts
 
@@ -77,9 +95,9 @@ above; later documentation-only commits do not change their application source.
 
 | Artifact | Download | Actions archive SHA256 |
 | --- | --- | --- |
-| Installer | [Actions artifact](https://github.com/fbriceno97/OrcaSlicer/actions/runs/41347476594/artifacts/13100452556) | `eae27ae14400623fd05daec2c48d203cebea61eac90622ad4d467dd777a579cb` |
-| Portable | [Actions artifact](https://github.com/fbriceno97/OrcaSlicer/actions/runs/41347476594/artifacts/13100397955) | `90fb93e0576304ff93d6861143646554bd11e11c5f1d56e8816c6c6ad1b8a81d` |
-| Native JUnit report | [Actions artifact](https://github.com/fbriceno97/OrcaSlicer/actions/runs/41347476594/artifacts/13100073476) | `287aec6ed6c82759f25d363f94772eeef0770a25b8338bdfcf76f816f0adec00` |
+| Installer | [Actions artifact](https://github.com/fbriceno97/OrcaSlicer/actions/runs/41382693709/artifacts/13114538362) | `1b0d480777a776bd10a2333f8a696166d7299e578de11776d2658394a20e5435` |
+| Portable | [Actions artifact](https://github.com/fbriceno97/OrcaSlicer/actions/runs/41382693709/artifacts/13115130230) | `05d5164b1c6cd86b81a1e4cda2be2d47181e098bc9cb2bc3261e75ba35304a0c` |
+| Native JUnit report | [Actions artifact](https://github.com/fbriceno97/OrcaSlicer/actions/runs/41382693709/artifacts/13114467410) | `d79d9550d0ee61475dc0a2a5b7ba4a70ddd7abf4f8924965ebb855e01b0226ee` |
 
 Digests identify the Actions ZIP archives, not the installer executable inside.
 
